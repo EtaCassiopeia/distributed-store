@@ -134,7 +134,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   }
 
   def displayStats(): DistributedMapNode = {
-    Logger.info(s"[$name] total => read ops ${counterRead.get()} / write ops ${counterWrite.get()} / delete ops ${counterDelete.get()}")
+    Logger.info(s"[$name] read ops ${counterRead.get()} / write ops ${counterWrite.get()} / delete ops ${counterDelete.get()}")
     this
   }
 
