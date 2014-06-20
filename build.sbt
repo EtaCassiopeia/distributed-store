@@ -12,9 +12,9 @@ libraryDependencies += "com.typesafe.akka"         %% "akka-cluster"            
 
 libraryDependencies += "com.typesafe.play"         %% "play-json"                % "2.3.0"
 
-//libraryDependencies += "org.fusesource.leveldbjni" % "leveldbjni-all"            % "1.6.1"       
+libraryDependencies += "org.iq80.leveldb"          % "leveldb"                   % "0.7"
 
-libraryDependencies += "org.iq80.leveldb"          % "leveldb"                   % "0.7"         
+libraryDependencies += "com.google.guava"          % "guava"                     % "17.0"
 
 libraryDependencies += "ch.qos.logback"            % "logback-classic"           % "1.1.1"
 
