@@ -138,6 +138,8 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
     this
   }
 
+  def targets(key: String): Seq[Address] = service().targetAndNext(key).map(_.address)
+
   // Client API
 
   def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {

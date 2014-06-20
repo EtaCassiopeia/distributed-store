@@ -59,6 +59,17 @@ class ApiSpec extends Specification with Tags {
       success
     }
 
+    "Always target same nodes" in {
+      keys.foreach { key =>
+        val targets = node1.targets(key)
+        node2.targets(key) shouldEqual targets
+        node3.targets(key) shouldEqual targets
+        node4.targets(key) shouldEqual targets
+        node5.targets(key) shouldEqual targets
+      }
+      success
+    }
+
     "Stop the node" in {
       node1.displayStats().stop()
       node2.displayStats().stop()
