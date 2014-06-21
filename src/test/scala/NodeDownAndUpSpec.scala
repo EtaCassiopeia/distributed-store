@@ -17,20 +17,20 @@ class NodeDownAndUpSpec extends Specification with Tags {
     implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-    val node1 = DistributedMapNode("node1")
-    val node2 = DistributedMapNode("node2")
-    val node3 = DistributedMapNode("node3")
-    val node4 = DistributedMapNode("node4")
-    val node5 = DistributedMapNode("node5")
-    val node6 = DistributedMapNode("node6")
-    val node7 = DistributedMapNode("node7")
-    val node8 = DistributedMapNode("node8")
-    val node9 = DistributedMapNode("node9")
+    val node1 = DistributedMapNode(s"node1-${IdGenerator.uuid}")
+    val node2 = DistributedMapNode(s"node2-${IdGenerator.uuid}")
+    val node3 = DistributedMapNode(s"node3-${IdGenerator.uuid}")
+    val node4 = DistributedMapNode(s"node4-${IdGenerator.uuid}")
+    val node5 = DistributedMapNode(s"node5-${IdGenerator.uuid}")
+    val node6 = DistributedMapNode(s"node6-${IdGenerator.uuid}")
+    val node7 = DistributedMapNode(s"node7-${IdGenerator.uuid}")
+    val node8 = DistributedMapNode(s"node8-${IdGenerator.uuid}")
+    val node9 = DistributedMapNode(s"node9-${IdGenerator.uuid}")
     var keys = Seq[String]()
     val counterOk = new AtomicLong(0L)
     val counterKo = new AtomicLong(0L)
 
-    "Start the node" in {
+    "Start some nodes" in {
       node1.start()
       node2.start()
       node3.start()
@@ -74,7 +74,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
       success
     }
 
-    "Startup down nodes" in {
+    "Startup down nodes again" in {
       node2.start()
       node4.start()
       node6.start()
