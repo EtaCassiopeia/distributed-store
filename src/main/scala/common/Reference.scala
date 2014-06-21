@@ -6,7 +6,6 @@ class Reference[T](name: String) {
 
   private val ref = new AtomicReference[Option[T]](None)
 
-  // TODO : only settable once ???
   def set(value: T): Option[T] = ref.getAndSet(Option(value))
 
   def <==(value: T): Option[T] = set(value)

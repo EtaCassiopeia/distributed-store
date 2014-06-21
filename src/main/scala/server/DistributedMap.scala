@@ -107,6 +107,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
   private[this] val counterRead = new AtomicLong(0L)
   private[this] val counterWrite = new AtomicLong(0L)
   private[this] val counterDelete = new AtomicLong(0L)
+  private[this] val counterRebalancedKey = new AtomicLong(0L)
   private[this] val generator = IdGenerator(Random.nextInt(1024))
   private[this] val options = new Options()
   private[this] val membersList = new ConcurrentHashMap[String, Member]()
@@ -191,10 +192,18 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
     }
     Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
     filtered.map { key =>
-      val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId()))
-      deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId())) // Hot !!!
-      // TODO : not safe operation here. What if None, or retry
-      Await.result(set(key, doc.value.getOrElse(Json.obj())), Duration(10, TimeUnit.SECONDS))  // TODO : config
+      val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.getOrElse(throw new RuntimeException("No doc, WTF !!!"))
+      deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
+      val futureSet = set(key, doc)
+      futureSet.onComplete {
+        case Success(opStatus) => counterRebalancedKey.incrementAndGet()
+        case Failure(e) => {
+          // TODO : retry ?
+          setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
+          rebalance()
+        }
+      }
+      Await.result(futureSet, Duration(10, TimeUnit.SECONDS))  // TODO : config
       rebalanced.incrementAndGet()
     }
     Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved")
@@ -223,7 +232,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
   }
 
   def displayStats(): DistributedMapNode = {
-    Logger.info(s"[$name] read ops ${counterRead.get()} / write ops ${counterWrite.get()} / delete ops ${counterDelete.get()}")
+    Logger.info(s"[$name] read ops ${counterRead.get()} / write ops ${counterWrite.get()} / delete ops ${counterDelete.get()} / rebalanced ${counterRebalancedKey.get()}")
     this
   }
 
