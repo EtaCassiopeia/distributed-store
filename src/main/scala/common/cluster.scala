@@ -43,7 +43,7 @@ object SeedHelper {
   val udpPort = 6666
   val defaultRemotePort = 2550
 
-  def bootstrapSeed(configuration: Configuration)(implicit ec: ExecutionContext): Future[SeedConfig] = {
+  def bootstrapSeed(configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): Future[SeedConfig] = {
 
     def openUdpServer() = {
       // Check if no other seed on the machine
@@ -80,9 +80,11 @@ object SeedHelper {
     val port = Random.nextInt (1000) + 7000
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
+    if (clientOnly) configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-NODE-CLIENT"]\n""")
     Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
     val server = Try(openUdpServer()).isSuccess
     if (server) {
+      // TODO : kill it
       ActorSystem("UPD-Bootstrap").actorOf(Props(classOf[UDPServer], address, port))
       configBuilder.append( s"""akka.cluster.seed-nodes=["akka.tcp://${Env.systemName}@$address:$port"]""")
       config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)

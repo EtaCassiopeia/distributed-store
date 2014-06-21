@@ -18,13 +18,13 @@ import play.api.libs.json.{JsValue, Json}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.{Failure, Success, Try}
+import scala.util.{Random, Failure, Success, Try}
 
 class DistributionService(system: ActorSystem) {
 
   val UTF8 = Charset.forName("UTF-8")
 
-  def listOfNodes(): Seq[Member] = Client.members()
+  def listOfNodes(): Seq[Member] = Client.members().filter(_.getRoles.contains(Env.nodeRole))
 
   def numberOfNodes(): Int = listOfNodes().size
 
@@ -56,9 +56,9 @@ class DistributionService(system: ActorSystem) {
 
 class NodeService(node: DistributedMapNode) extends Actor {
   override def receive: Receive = {
-    case o @ GetOperation(key) => sender() ! node.getOperation(o)
-    case o @ SetOperation(key, value) => sender() ! node.setOperation(o)
-    case o @ DeleteOperation(key) => sender() ! node.deleteOperation(o)
+    case o @ GetOperation(key, t, id) => sender() ! node.getOperation(o)
+    case o @ SetOperation(key, value, t, id) => sender() ! node.setOperation(o)
+    case o @ DeleteOperation(key, t, id) => sender() ! node.deleteOperation(o)
     case _ =>
   }
 }
@@ -73,6 +73,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   private val counterRead = new AtomicLong(0L)
   private val counterWrite = new AtomicLong(0L)
   private val counterDelete = new AtomicLong(0L)
+  private val generator = IdGenerator(Random.nextInt(1024))
 
   private val options = new Options()
   private val wo = new WriteOptions()
@@ -80,18 +81,19 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   options.createIfMissing(true)
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
-    // TODO : setup IdGenerator id
     // TODO : check if sync is necessary
     // TODO : listen to cluster changes to impact consistent hashing, topology, synchro, etc ...
-    val fu = SeedHelper.bootstrapSeed(config).map { seeds =>
+    val fu = SeedHelper.bootstrapSeed(config, clientOnly).map { seeds =>
       system.set(ActorSystem(Env.systemName, seeds.config()))
       Client.system.set(system())
       cluster.set(Cluster(system()))
       Client.cluster.set(cluster())
       Client.init()
       service <== new DistributionService(system())
-      node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
-      db <== Iq80DBFactory.factory.open(path, options)
+      if (!clientOnly) {
+        node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+        db <== Iq80DBFactory.factory.open(path, options)
+      }
       seeds.joinClusterIfSeed(cluster())
     }
     fu.onComplete {
@@ -103,34 +105,35 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   }
 
   def stop(): DistributedMapNode = {
+    system().shutdown()
     db().close()
     this
   }
 
-  private[server] def destroy(): Unit = {
+  def destroy(): Unit = {
     Iq80DBFactory.factory.destroy(path, options)
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
     counterWrite.incrementAndGet()
     Try { db().put(Iq80DBFactory.bytes(op.key), Iq80DBFactory.bytes(Json.stringify(op.value))) } match {
-      case Success(s) => OpStatus(true, op.key, None, System.currentTimeMillis(), IdGenerator.nextId())
-      case Failure(e) => OpStatus(false, op.key, None, System.currentTimeMillis(), IdGenerator.nextId())
+      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
+      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
     }
   }
 
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
     counterDelete.incrementAndGet()
     Try { db().delete(Iq80DBFactory.bytes(op.key)) } match {
-      case Success(s) => OpStatus(true, op.key, None, System.currentTimeMillis(), IdGenerator.nextId())
-      case Failure(e) => OpStatus(false, op.key, None, System.currentTimeMillis(), IdGenerator.nextId())
+      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
+      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
     }
   }
 
   private[server] def getOperation(op: GetOperation): OpStatus = {
     counterRead.incrementAndGet()
     val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-    OpStatus(true, op.key, opt, System.currentTimeMillis(), IdGenerator.nextId())
+    OpStatus(true, op.key, opt, op.timestamp, op.operationId)
   }
 
   def displayStats(): DistributedMapNode = {
@@ -144,22 +147,22 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
 
   def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(SetOperation(key, value), targets)
+    service().performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(SetOperation(key, value), targets)
+    service().performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(DeleteOperation(key), targets)
+    service().performAndWaitForQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(GetOperation(key), targets).map(_.value)
+    service().performAndWaitForQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
   }
 }
 

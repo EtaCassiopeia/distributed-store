@@ -35,10 +35,10 @@ class ApiSpec extends Specification with Tags {
 
     "Insert some stuff" in {
       for (i <- 0 to 1000) {
-        val id = s"${IdGenerator.nextId()}"
+        val id = IdGenerator.uuid
         keys = keys :+ id
         Await.result( node1.set(id, Json.obj(
-          "Hello" -> "World"
+          "Hello" -> "World", "key" -> id
         )), timeout)
       }
       success
@@ -47,7 +47,7 @@ class ApiSpec extends Specification with Tags {
     "Read some stuff" in {
       Await.result(node1.get("key3"), timeout) should beNone
       keys.foreach { key =>
-        Await.result(node1.get(key), timeout) shouldEqual Some(Json.obj("Hello" -> "World"))
+        Await.result(node1.get(key), timeout) shouldEqual Some(Json.obj("Hello" -> "World", "key" -> key))
       }
       success
     }
@@ -59,7 +59,7 @@ class ApiSpec extends Specification with Tags {
       success
     }
 
-    "Always target same nodes" in {
+    "Always target same nodes in the ring" in {
       keys.foreach { key =>
         val targets = node1.targets(key)
         node2.targets(key) shouldEqual targets
@@ -70,12 +70,26 @@ class ApiSpec extends Specification with Tags {
       success
     }
 
+    "Always target same nodes for the same key" in {
+      for (i <- 0 to 10) {
+        val key = IdGenerator.uuid
+        for (j <- 0 to 100) {
+          val targets = node1.targets(key)
+          node2.targets(key) shouldEqual targets
+          node3.targets(key) shouldEqual targets
+          node4.targets(key) shouldEqual targets
+          node5.targets(key) shouldEqual targets
+        }
+      }
+      success
+    }
+
     "Stop the node" in {
-      node1.displayStats().stop()
-      node2.displayStats().stop()
-      node3.displayStats().stop()
-      node4.displayStats().stop()
-      node5.displayStats().stop()
+      node1.displayStats().stop().destroy()
+      node2.displayStats().stop().destroy()
+      node3.displayStats().stop().destroy()
+      node4.displayStats().stop().destroy()
+      node5.displayStats().stop().destroy()
       success
     }
   }
