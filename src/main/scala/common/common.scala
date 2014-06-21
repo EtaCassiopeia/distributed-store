@@ -75,7 +75,7 @@ class Logger(val logger: org.slf4j.Logger) extends LoggerLike  {
 }
 
 object Logger extends LoggerLike {
-  lazy val logger = LoggerFactory.getLogger("ReactiveCouchbase")
+  lazy val logger = LoggerFactory.getLogger("Distributed-Map")
   def apply(name: String): LoggerLike = new Logger(LoggerFactory.getLogger(name))
   def apply[T](clazz: Class[T]): LoggerLike = new Logger(LoggerFactory.getLogger(clazz))
 

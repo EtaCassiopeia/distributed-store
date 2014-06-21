@@ -24,14 +24,17 @@ class ClusterStateClient extends Actor {
 
   def receive = {
     case MemberUp(member) => {
+      Logger("ClusterStateClient").debug("Member Up")
       Client.addMember(member)
       Client.displayState()
     }
     case UnreachableMember(member) => {
+      Logger("ClusterStateClient").debug("Member Down")
       Client.removeMember(member)
       Client.displayState()
     }
     case MemberRemoved(member, previousStatus) => {
+      Logger("ClusterStateClient").debug("Member Down")
       Client.removeMember(member)
       Client.displayState()
     }
@@ -46,7 +49,7 @@ object Client {
   def addMember(member: Member) = {
     if (!membersList.containsKey(member)) membersList.put(member.address.toString, member)
   }
-  def removeMember(member: Member) = if (membersList.containsKey(member)) membersList.remove(member.address.toString)
+  def removeMember(member: Member) = if (membersList.containsKey(member.address.toString)) membersList.remove(member.address.toString)
   def members(): List[Member] = membersList.values().toList.sortBy(_.address.toString)
 
   def displayState() = {

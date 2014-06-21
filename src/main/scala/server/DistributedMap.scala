@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.{AtomicLong, AtomicInteger}
 import akka.actor._
 import akka.cluster.{Cluster, Member}
 import akka.pattern.ask
+import akka.util.Timeout
 import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
@@ -23,6 +24,7 @@ import scala.util.{Random, Failure, Success, Try}
 class DistributionService(system: ActorSystem) {
 
   val UTF8 = Charset.forName("UTF-8")
+  val timeout = Timeout(1, TimeUnit.SECONDS)
 
   def listOfNodes(): Seq[Member] = Client.members().filter(_.getRoles.contains(Env.nodeRole))
 
@@ -43,13 +45,20 @@ class DistributionService(system: ActorSystem) {
   def performAndWaitForQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system.dispatcher
     Future.sequence(targets.map { member =>
-      system.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Client.timeout).mapTo[OpStatus]
+      system.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(timeout).mapTo[OpStatus].recover {
+        case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+      }
     }).map { fuStatuses =>
       val successfulStatuses = fuStatuses.filter(_.successful)
       val first = successfulStatuses.head
       val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
       if (valid >= quorum()) first
-      else OpStatus(false, first.key, None, first.operationId, first.timestamp)
+      else {
+        Logger.debug("Operation failed :")
+        Logger.debug(s"Head was $first")
+        Logger.debug(s"Valid was $valid/${quorum()}")
+        OpStatus(false, first.key, None, first.operationId, first.timestamp)
+      }
     }
   }
 }
@@ -107,6 +116,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   }
 
   def stop(): DistributedMapNode = {
+    cluster().leave(cluster().selfAddress)
     bootSystem().shutdown()
     system().shutdown()
     db().close()
