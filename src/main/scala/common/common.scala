@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory
 
 import scala.concurrent.{Future, ExecutionContextExecutorService, Promise, ExecutionContext}
 import scala.concurrent.duration.FiniteDuration
+import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
 trait LoggerLike {
@@ -171,7 +172,24 @@ class Configuration(val underlying: Config) {
   }
 }
 
-object FutureTimeout {
+object Futures {
+
+  private[this] def retryPromise[T](times: Int, promise: Promise[T], failure: Option[Throwable], f: => Future[T], ec: ExecutionContext): Unit = {
+    (times, failure) match {
+      case (0, Some(e)) => promise.tryFailure(e)
+      case (0, None) => promise.tryFailure(new RuntimeException("Failure, but lost track of exception :-("))
+      case (i, _) => f.onComplete {
+        case Success(t) => promise.trySuccess(t)
+        case Failure(e) => retryPromise[T](times - 1, promise, Some(e), f, ec)
+      }(ec)
+    }
+  }
+
+  def retry[T](times: Int)(f: => Future[T])(implicit ec: ExecutionContext): Future[T] = {
+    val promise = Promise[T]()
+    retryPromise[T](times, promise, None, f, ec)
+    promise.future
+  }
 
   def timeout[A](message: => A, duration: scala.concurrent.duration.Duration, scheduler: Scheduler)(implicit ec: ExecutionContext): Future[A] = {
     timeout(message, duration.toMillis, TimeUnit.MILLISECONDS, scheduler)

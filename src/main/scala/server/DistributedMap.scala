@@ -1,15 +1,13 @@
 package server
 
 import java.io.File
-import java.nio.charset.Charset
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import akka.actor._
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
 import akka.pattern.ask
-import akka.util.Timeout
 import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
@@ -18,15 +16,11 @@ import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
-import scala.concurrent.duration.Duration
+import scala.collection.JavaConversions._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
-import collection.JavaConversions._
 
 class DistributionService(system: ActorSystem, node: DistributedMapNode,  replicates: Int) {
-
-  val UTF8 = Charset.forName("UTF-8")
-  val timeout = Timeout(5, TimeUnit.SECONDS)
 
   def listOfNodes(): Seq[Member] = node.members().filter(_.getRoles.contains(Env.nodeRole))
 
@@ -52,7 +46,7 @@ class DistributionService(system: ActorSystem, node: DistributedMapNode,  replic
   def performAndWaitForQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system.dispatcher
     Future.sequence(targets.map { member =>
-      system.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(timeout).mapTo[OpStatus].recover {
+      system.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
         case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
       }
     }).map { fuStatuses =>
@@ -96,7 +90,7 @@ class NodeService(node: DistributedMapNode) extends Actor {
   }
 }
 
-class DistributedMapNode(name: String, replicates: Int = 2, config: Configuration, path: File, clientOnly: Boolean = false) {
+class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, config: Configuration, path: File, clientOnly: Boolean = false) {
 
   private[this] val db = Reference.empty[DB]()
   private[this] val node = Reference.empty[ActorRef]()
@@ -115,7 +109,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
   options.createIfMissing(true)
   Logger.configure()
 
-  if (replicates < 2) throw new RuntimeException("Cannot have less than 2 replicates")
+  if (replicates < Env.minimumReplicates) throw new RuntimeException(s"Cannot have less than ${Env.minimumReplicates} replicates")
 
   private[server] def addMember(member: Member) = if (!membersList.containsKey(member)) membersList.put(member.address.toString, member)
   private[server] def removeMember(member: Member) = if (membersList.containsKey(member.address.toString)) membersList.remove(member.address.toString)
@@ -128,7 +122,6 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
     }
     Logger("CLIENTS_WATCHER").debug(s"----------------------------------------------------------------------------")
   }
-
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     bootSystem <== ActorSystem("UDP-Server")
@@ -146,14 +139,14 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
       case Failure(e) => Logger.error("Something wrong happened", e)
       case _ =>
     }
-    Await.result(fu, Duration(10, TimeUnit.SECONDS))
-    def sync(): Unit = {
-      system().scheduler.scheduleOnce(Duration(5, TimeUnit.MINUTES)) {  // TODO : from config
+    Await.result(fu, Env.waitForCluster)
+    def syncNode(): Unit = {
+      system().scheduler.scheduleOnce(Env.autoResync) {
         Try { blockingRebalance() }
-        sync()
+        syncNode()
       }
     }
-    //sync()
+    //syncNode()
     this
   }
 
@@ -173,7 +166,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
   private[server] def rebalance(): Unit = {
     implicit val ec = system().dispatcher
     if (run.compareAndSet(false, true)) {
-      system().scheduler.scheduleOnce(Duration(5, TimeUnit.SECONDS)) { // TODO : config
+      system().scheduler.scheduleOnce(Env.rebalanceConflate) {
         blockingRebalance()
         run.compareAndSet(true, false)
       }
@@ -194,16 +187,15 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
     filtered.map { key =>
       val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.getOrElse(throw new RuntimeException("No doc, WTF !!!"))
       deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
-      val futureSet = set(key, doc)
+      val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
       futureSet.onComplete {
         case Success(opStatus) => counterRebalancedKey.incrementAndGet()
         case Failure(e) => {
-          // TODO : retry ?
           setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
           rebalance()
         }
       }
-      Await.result(futureSet, Duration(10, TimeUnit.SECONDS))  // TODO : config
+      Await.result(futureSet, Env.waitForRebalanceKey)
       rebalanced.incrementAndGet()
     }
     Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved")
@@ -262,10 +254,10 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
 }
 
 object DistributedMapNode {
-  def apply() = new DistributedMapNode(IdGenerator.uuid, 2, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid))
+  def apply() = new DistributedMapNode(IdGenerator.uuid, Env.minimumReplicates, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid))
   def apply(replicates: Int) = new DistributedMapNode(IdGenerator.uuid, replicates, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid))
   def apply(name: String, replicates: Int) = new DistributedMapNode(name, replicates, new Configuration(ConfigFactory.load()), new File(name))
-  def apply(name: String) = new DistributedMapNode(name, 2, new Configuration(ConfigFactory.load()), new File(name))
+  def apply(name: String) = new DistributedMapNode(name, Env.minimumReplicates, new Configuration(ConfigFactory.load()), new File(name))
   def apply(replicates: Int, path: File) = new DistributedMapNode(IdGenerator.uuid, replicates, new Configuration(ConfigFactory.load()), path)
   def apply(name: String, replicates: Int, path: File) = new DistributedMapNode(name, replicates, new Configuration(ConfigFactory.load()), path)
   def apply(replicates: Int, config: Configuration, path: File) = new DistributedMapNode(IdGenerator.uuid, replicates, config, path)
