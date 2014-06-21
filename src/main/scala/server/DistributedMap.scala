@@ -173,6 +173,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] def blockingRebalance(): Unit = {
     import scala.collection.JavaConversions._
     implicit val ec = system().dispatcher
+    val start = System.currentTimeMillis()
     val nodes = numberOfNodes()
     val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey) }.toList
     val rebalanced = new AtomicLong(0L)
@@ -195,7 +196,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
       Await.result(futureSet, Env.waitForRebalanceKey)
       rebalanced.incrementAndGet()
     }
-    Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved")
+    Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
