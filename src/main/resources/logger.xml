@@ -1,0 +1,20 @@
+<configuration>
+
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  
+  <logger name="Distributed-Map" level="DEBUG" />
+  <logger name="ClusterStateClient" level="INFO" />
+  <logger name="CLIENTS_WATCHER" level="INFO" />
+  <logger name="AKKA-LB-CLIENTS" level="INFO" />
+  <logger name="UDPServer" level="INFO" />
+  <logger name="SeedHelper" level="INFO" />
+
+  <root level="ERROR">
+    <appender-ref ref="STDOUT" />
+  </root>
+  
+</configuration>

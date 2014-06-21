@@ -101,6 +101,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   private val options = new Options()
 
   options.createIfMissing(true)
+  Logger.configure()
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     // TODO : check if sync is necessary
