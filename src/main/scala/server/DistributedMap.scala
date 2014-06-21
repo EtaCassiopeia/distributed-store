@@ -19,48 +19,7 @@ import play.api.libs.json.{JsValue, Json}
 import scala.collection.JavaConversions._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
-
-class DistributionService(system: ActorSystem, node: DistributedMapNode,  replicates: Int) {
-
-  def listOfNodes(): Seq[Member] = node.members().filter(_.getRoles.contains(Env.nodeRole))
-
-  def numberOfNodes(): Int = listOfNodes().size
-
-  def target(key: String): Member = {
-    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
-    listOfNodes()(id % (if (numberOfNodes() > 0) numberOfNodes() else 1))
-  }
-
-  def targetAndNext(key: String): Seq[Member] = {
-    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
-    var targets = Seq[Member]()
-    for (i <- 0 to replicates + 1) {
-      val next = (id + i) % (if (numberOfNodes() > 0) numberOfNodes() else 1)
-      targets = targets :+ listOfNodes()(next)
-    }
-    targets
-  }
-
-  def quorum(): Int = ((replicates + 1) / 2) + 1
-
-  def performAndWaitForQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
-    implicit val ec = system.dispatcher
-    Future.sequence(targets.map { member =>
-      system.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
-        case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
-      }
-    }).map { fuStatuses =>
-      val successfulStatuses = fuStatuses.filter(_.successful)
-      val first = successfulStatuses.head
-      val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
-      if (valid >= quorum()) first
-      else {
-        Logger.debug(s"Operation failed : Head was $first, quorum was $valid / ${quorum()} mandatory")
-        OpStatus(false, first.key, None, first.operationId, first.timestamp)
-      }
-    }
-  }
-}
+import collection.JavaConversions._
 
 class NodeService(node: DistributedMapNode) extends Actor {
   override def preStart(): Unit = {
@@ -97,7 +56,6 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] val bootSystem = Reference.empty[ActorSystem]()
   private[this] val system = Reference.empty[ActorSystem]()
   private[this] val cluster = Reference.empty[Cluster]()
-  private[this] val service = Reference.empty[DistributionService]()
   private[this] val counterRead = new AtomicLong(0L)
   private[this] val counterWrite = new AtomicLong(0L)
   private[this] val counterDelete = new AtomicLong(0L)
@@ -128,7 +86,6 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     val fu = SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly).map { seeds =>
       system <== ActorSystem(Env.systemName, seeds.config())
       cluster <== Cluster(system())
-      service <== new DistributionService(system(), this, replicates)
       if (!clientOnly) {
         node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
         db <== Iq80DBFactory.factory.open(path, options)
@@ -162,7 +119,47 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     Iq80DBFactory.factory.destroy(path, options)
   }
 
-  private val run = new AtomicBoolean(false)
+  private[this] def listOfNodes(): Seq[Member] = members().filter(_.getRoles.contains(Env.nodeRole))
+
+  private[this] def numberOfNodes(): Int = listOfNodes().size
+
+  private[this] def target(key: String): Member = {
+    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
+    listOfNodes()(id % (if (numberOfNodes() > 0) numberOfNodes() else 1))
+  }
+
+  private[this] def targetAndNext(key: String): Seq[Member] = {
+    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
+    var targets = Seq[Member]()
+    for (i <- 0 to replicates + 1) {
+      val next = (id + i) % (if (numberOfNodes() > 0) numberOfNodes() else 1)
+      targets = targets :+ listOfNodes()(next)
+    }
+    targets
+  }
+
+  private[this] def quorum(): Int = ((replicates + 1) / 2) + 1
+
+  private[this] def performAndWaitForQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
+    implicit val ec = system().dispatcher
+    Future.sequence(targets.map { member =>
+      system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
+        case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+      }
+    }).map { fuStatuses =>
+      val successfulStatuses = fuStatuses.filter(_.successful)
+      val first = successfulStatuses.head
+      val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
+      if (valid >= quorum()) first
+      else {
+        Logger.debug(s"Operation failed : Head was $first, quorum was $valid / ${quorum()} mandatory")
+        OpStatus(false, first.key, None, first.operationId, first.timestamp)
+      }
+    }
+  }
+
+  private[this] val run = new AtomicBoolean(false)
+
   private[server] def rebalance(): Unit = {
     implicit val ec = system().dispatcher
     if (run.compareAndSet(false, true)) {
@@ -173,15 +170,15 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     }
   }
 
-  private def blockingRebalance(): Unit = {
+  private[this] def blockingRebalance(): Unit = {
     import scala.collection.JavaConversions._
     implicit val ec = system().dispatcher
-    val nodes = service().numberOfNodes()
+    val nodes = numberOfNodes()
     val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey) }.toList
     val rebalanced = new AtomicLong(0L)
     val filtered = keys.filter { key =>
-      val target = service().target(key)
-      !target.address.toString.contains(cluster().selfAddress.toString)
+      val t = target(key)
+      !t.address.toString.contains(cluster().selfAddress.toString)
     }
     Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
     filtered.map { key =>
@@ -228,28 +225,29 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     this
   }
 
-  def targets(key: String): Seq[Address] = service().targetAndNext(key).map(_.address)
+  // For testing purpose
+  def targets(key: String): Seq[Address] = targetAndNext(key).map(_.address)
 
   // Client API
 
   def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    val targets = targetAndNext(key)
+    performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    val targets = targetAndNext(key)
+    performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
+    val targets = targetAndNext(key)
+    performAndWaitForQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
-    val targets = service().targetAndNext(key)
-    service().performAndWaitForQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
+    val targets = targetAndNext(key)
+    performAndWaitForQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
   }
 }
 
