@@ -1,19 +1,20 @@
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{Executors, TimeUnit}
 
-import common.{IdGenerator, ExecutionContextExecutorServiceBridge}
+import common.{IdGenerator, Logger}
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
 import server.DistributedMapNode
 
-import scala.concurrent.{ExecutionContext, Await}
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 
-class ApiSpec extends Specification with Tags {
+class NodeDownAndUpSpec extends Specification with Tags {
   sequential
 
   "Distributed Map" should {
 
-    implicit val timeout = Duration(1, TimeUnit.SECONDS)
+    implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
     val node1 = DistributedMapNode("node1")
@@ -26,6 +27,8 @@ class ApiSpec extends Specification with Tags {
     val node8 = DistributedMapNode("node8")
     val node9 = DistributedMapNode("node9")
     var keys = Seq[String]()
+    val counterOk = new AtomicLong(0L)
+    val counterKo = new AtomicLong(0L)
 
     "Start the node" in {
       node1.start()
@@ -37,7 +40,7 @@ class ApiSpec extends Specification with Tags {
       node7.start()
       node8.start()
       node9.start()
-      Thread.sleep(3000)   // Wait for cluster setup
+      Thread.sleep(6000)   // Wait for cluster setup
       success
     }
 
@@ -52,10 +55,38 @@ class ApiSpec extends Specification with Tags {
       success
     }
 
+    "Shutdown some nodes" in {
+      node2.displayStats().stop().destroy()
+      node4.displayStats().stop().destroy()
+      node6.displayStats().stop().destroy()
+      Thread.sleep(20000)
+      success
+    }
+
+    "Insert some stuff again" in {
+      for (i <- 0 to 1000) {
+        val id = IdGenerator.uuid
+        keys = keys :+ id
+        Await.result( node1.set(id, Json.obj(
+          "Hello" -> "World", "key" -> id
+        )), timeout)
+      }
+      success
+    }
+
+    "Startup down nodes" in {
+      node2.start()
+      node4.start()
+      node6.start()
+      Thread.sleep(20000)
+      success
+    }
+
     "Read some stuff" in {
-      Await.result(node1.get("key3"), timeout) should beNone
       keys.foreach { key =>
-        Await.result(node1.get(key), timeout) shouldEqual Some(Json.obj("Hello" -> "World", "key" -> key))
+        val expected = Some(Json.obj("Hello" -> "World", "key" -> key))
+        if (Await.result(node1.get(key), timeout) == expected) counterOk.incrementAndGet()
+        else counterKo.incrementAndGet()
       }
       success
     }
@@ -67,40 +98,7 @@ class ApiSpec extends Specification with Tags {
       success
     }
 
-    "Always target same nodes in the ring" in {
-      keys.foreach { key =>
-        val targets = node1.targets(key)
-        node2.targets(key) shouldEqual targets
-        node3.targets(key) shouldEqual targets
-        node4.targets(key) shouldEqual targets
-        node5.targets(key) shouldEqual targets
-        node6.targets(key) shouldEqual targets
-        node7.targets(key) shouldEqual targets
-        node8.targets(key) shouldEqual targets
-        node9.targets(key) shouldEqual targets
-      }
-      success
-    }
-
-    "Always target same nodes for the same key" in {
-      for (i <- 0 to 10) {
-        val key = IdGenerator.uuid
-        for (j <- 0 to 100) {
-          val targets = node1.targets(key)
-          node2.targets(key) shouldEqual targets
-          node3.targets(key) shouldEqual targets
-          node4.targets(key) shouldEqual targets
-          node5.targets(key) shouldEqual targets
-          node6.targets(key) shouldEqual targets
-          node7.targets(key) shouldEqual targets
-          node8.targets(key) shouldEqual targets
-          node9.targets(key) shouldEqual targets
-        }
-      }
-      success
-    }
-
-    "Stop the node" in {
+    "Stop the nodes" in {
       node1.displayStats().stop().destroy()
       node2.displayStats().stop().destroy()
       node3.displayStats().stop().destroy()
@@ -110,6 +108,10 @@ class ApiSpec extends Specification with Tags {
       node7.displayStats().stop().destroy()
       node8.displayStats().stop().destroy()
       node9.displayStats().stop().destroy()
+      Thread.sleep(5000)
+      Logger.info(s"Read OK ${counterOk.get()}")
+      Logger.info(s"Read KO ${counterKo.get()}")
+      counterKo.get() shouldEqual 0L
       success
     }
   }

@@ -3,9 +3,10 @@ package server
 import java.io.File
 import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.{AtomicLong, AtomicInteger}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import akka.actor._
+import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
 import akka.pattern.ask
 import akka.util.Timeout
@@ -14,21 +15,26 @@ import com.typesafe.config.{Config, ConfigFactory}
 import common._
 import config.Env
 import org.iq80.leveldb.impl.Iq80DBFactory
-import org.iq80.leveldb.{DB, Options, WriteOptions}
+import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.{Random, Failure, Success, Try}
+import scala.util.{Failure, Random, Success, Try}
 
 class DistributionService(system: ActorSystem) {
 
   val UTF8 = Charset.forName("UTF-8")
-  val timeout = Timeout(1, TimeUnit.SECONDS)
+  val timeout = Timeout(5, TimeUnit.SECONDS)
 
   def listOfNodes(): Seq[Member] = Client.members().filter(_.getRoles.contains(Env.nodeRole))
 
   def numberOfNodes(): Int = listOfNodes().size
+
+  def target(key: String): Member = {
+    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
+    listOfNodes()(id % (if (numberOfNodes() > 0) numberOfNodes() else 1))
+  }
 
   def targetAndNext(key: String): Seq[Member] = {
     val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
@@ -64,10 +70,17 @@ class DistributionService(system: ActorSystem) {
 }
 
 class NodeService(node: DistributedMapNode) extends Actor {
+  override def preStart(): Unit = {
+    Cluster(context.system).subscribe(self, initialStateMode = InitialStateAsEvents,
+      classOf[MemberEvent], classOf[UnreachableMember])
+  }
   override def receive: Receive = {
     case o @ GetOperation(key, t, id) => sender() ! node.getOperation(o)
     case o @ SetOperation(key, value, t, id) => sender() ! node.setOperation(o)
     case o @ DeleteOperation(key, t, id) => sender() ! node.deleteOperation(o)
+    case MemberUp(member) => node.rebalance()
+    case UnreachableMember(member) => node.rebalance()
+    case MemberRemoved(member, previousStatus) => node.rebalance()
     case _ =>
   }
 }
@@ -86,7 +99,6 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   private val generator = IdGenerator(Random.nextInt(1024))
 
   private val options = new Options()
-  private val wo = new WriteOptions()
 
   options.createIfMissing(true)
 
@@ -125,6 +137,40 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
 
   def destroy(): Unit = {
     Iq80DBFactory.factory.destroy(path, options)
+  }
+
+  private val run = new AtomicBoolean(false)
+  private[server] def rebalance(): Unit = {
+    implicit val ec = system().dispatcher
+    if (run.compareAndSet(false, true)) {
+      system().scheduler.scheduleOnce(Duration(5, TimeUnit.SECONDS)) { // TODO : config
+        blockingRebalance()
+        run.compareAndSet(true, false)
+      }
+    }
+  }
+
+  private def blockingRebalance(): Unit = {
+    import scala.collection.JavaConversions._
+    implicit val ec = system().dispatcher
+    val nodes = service().numberOfNodes()
+    Logger.debug(s"[$name] Rebalancing to ${nodes} nodes ...")
+    val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey) }.toList
+    Logger.debug(s"[$name] Found ${keys.size} keys")
+    val rebalanced = new AtomicLong(0L)
+    val filtered = keys.filter { key =>
+      val target = service().target(key)
+      !target.address.toString.contains(cluster().selfAddress.toString)
+    }
+    Logger.debug(s"[$name] Should move ${filtered.size} keys")
+    filtered.map { key =>
+      val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId()))
+      deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId())) // Hot !!!
+      // TODO : not safe operation here. What if None, or retry
+      Await.result(set(key, doc.value.getOrElse(Json.obj())), Duration(10, TimeUnit.SECONDS))  // TODO : config
+      rebalanced.incrementAndGet()
+    }
+    Logger.debug(s"[$name] Rebalancing $nodes nodes done ! ${rebalanced.get()} key moved")
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
