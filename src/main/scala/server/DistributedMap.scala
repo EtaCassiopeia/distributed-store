@@ -21,15 +21,32 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
 import collection.JavaConversions._
 
-class NodeService(node: DistributedMapNode) extends Actor {
-  override def preStart(): Unit = {
-    Cluster(context.system).subscribe(self, initialStateMode = InitialStateAsEvents,
-      classOf[MemberEvent], classOf[UnreachableMember])
-  }
+class NodeServiceWorker(node: DistributedMapNode) extends Actor {
   override def receive: Receive = {
     case o @ GetOperation(key, t, id) => sender() ! node.getOperation(o)
     case o @ SetOperation(key, value, t, id) => sender() ! node.setOperation(o)
     case o @ DeleteOperation(key, t, id) => sender() ! node.deleteOperation(o)
+    case _ =>
+  }
+}
+
+class NodeService(node: DistributedMapNode) extends Actor {
+  var workers = List[ActorRef]()
+  override def preStart(): Unit = {
+    Cluster(context.system).subscribe(self, initialStateMode = InitialStateAsEvents,
+      classOf[MemberEvent], classOf[UnreachableMember])
+    for(i <- 0 to Env.workers) {
+      workers = workers :+ context.system.actorOf(Props(classOf[NodeServiceWorker], node))
+    }
+  }
+  def worker(key: String) = {
+    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), Env.workers)
+    workers(id % Env.workers)
+  }
+  override def receive: Receive = {
+    case o @ GetOperation(key, t, id) => worker(key) forward o
+    case o @ SetOperation(key, value, t, id) => worker(key) forward o
+    case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case MemberUp(member) => {
       node.addMember(member)
       node.displayState()

@@ -56,7 +56,7 @@ class LoadSpec extends Specification with Tags {
     }
 
     "Insert some stuff" in {
-      performBy(10)(10000) {
+      performBy(100)(1000) {
         val id = IdGenerator.uuid
         node1.set(id, Json.obj(
           "Hello" -> "World", "key" -> id

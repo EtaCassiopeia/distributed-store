@@ -13,6 +13,7 @@ object Env {
   val mapService = "DISTRIBUTED-MAP-SERVICE"
   val systemName = "distributed-map"
   val minimumReplicates = 2
+  val workers = 10
   val UTF8 = Charset.forName("UTF-8")
   val autoResync = Duration(5, TimeUnit.MINUTES)            // TODO : from file
   val waitForCluster = Duration(10, TimeUnit.SECONDS)       // TODO : from file
