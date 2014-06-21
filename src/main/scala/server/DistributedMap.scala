@@ -152,7 +152,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
       val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
       if (valid >= quorum()) first
       else {
-        Logger.debug(s"Operation failed : Head was $first, quorum was $valid / ${quorum()} mandatory")
+        Logger.debug(s"Operation failed : Head was $first, quorum was $valid success / ${quorum()} mandatory")
         OpStatus(false, first.key, None, first.operationId, first.timestamp)
       }
     }

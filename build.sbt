@@ -20,6 +20,8 @@ libraryDependencies += "ch.qos.logback"            % "logback-classic"          
 
 libraryDependencies += "com.typesafe"              % "config"                    % "1.2.1"
 
+libraryDependencies += "com.codahale.metrics"      % "metrics-core"              % "3.0.2"
+
 libraryDependencies += "org.specs2"                %% "specs2"                   % "2.3.12"            % "test"
 
 
