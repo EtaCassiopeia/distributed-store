@@ -23,12 +23,12 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
 import collection.JavaConversions._
 
-class DistributionService(system: ActorSystem, replicates: Int) {
+class DistributionService(system: ActorSystem, node: DistributedMapNode,  replicates: Int) {
 
   val UTF8 = Charset.forName("UTF-8")
   val timeout = Timeout(5, TimeUnit.SECONDS)
 
-  def listOfNodes(): Seq[Member] = Client.members().filter(_.getRoles.contains(Env.nodeRole))
+  def listOfNodes(): Seq[Member] = node.members().filter(_.getRoles.contains(Env.nodeRole))
 
   def numberOfNodes(): Int = listOfNodes().size
 
@@ -61,9 +61,7 @@ class DistributionService(system: ActorSystem, replicates: Int) {
       val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
       if (valid >= quorum()) first
       else {
-        Logger.debug("Operation failed :")
-        Logger.debug(s"Head was $first")
-        Logger.debug(s"Valid was $valid/${quorum()}")
+        Logger.debug(s"Operation failed : Head was $first, quorum was $valid / ${quorum()} mandatory")
         OpStatus(false, first.key, None, first.operationId, first.timestamp)
       }
     }
@@ -136,7 +134,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
     val fu = SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly).map { seeds =>
       system <== ActorSystem(Env.systemName, seeds.config())
       cluster <== Cluster(system())
-      service <== new DistributionService(system(), replicates)
+      service <== new DistributionService(system(), this, replicates)
       if (!clientOnly) {
         node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
         db <== Iq80DBFactory.factory.open(path, options)
@@ -154,7 +152,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
         sync()
       }
     }
-    sync()
+    //sync()
     this
   }
 
@@ -185,15 +183,13 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
     import scala.collection.JavaConversions._
     implicit val ec = system().dispatcher
     val nodes = service().numberOfNodes()
-    Logger.debug(s"[$name] Rebalancing to ${nodes} nodes ...")
     val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey) }.toList
-    Logger.debug(s"[$name] Found ${keys.size} keys")
     val rebalanced = new AtomicLong(0L)
     val filtered = keys.filter { key =>
       val target = service().target(key)
       !target.address.toString.contains(cluster().selfAddress.toString)
     }
-    Logger.debug(s"[$name] Should move ${filtered.size} keys")
+    Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
     filtered.map { key =>
       val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId()))
       deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId())) // Hot !!!
@@ -201,7 +197,7 @@ class DistributedMapNode(name: String, replicates: Int = 2, config: Configuratio
       Await.result(set(key, doc.value.getOrElse(Json.obj())), Duration(10, TimeUnit.SECONDS))  // TODO : config
       rebalanced.incrementAndGet()
     }
-    Logger.debug(s"[$name] Rebalancing $nodes nodes done ! ${rebalanced.get()} key moved")
+    Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved")
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
