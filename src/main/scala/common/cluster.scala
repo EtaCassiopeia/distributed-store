@@ -2,7 +2,7 @@ package common
 
 import java.net.{DatagramPacket, DatagramSocket, InetAddress, InetSocketAddress}
 
-import akka.actor.{ActorSystem, Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.cluster.Cluster
 import akka.io.{IO, Udp}
 import akka.util.ByteString
@@ -43,7 +43,7 @@ object SeedHelper {
   val udpPort = 6666
   val defaultRemotePort = 2550
 
-  def bootstrapSeed(configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): Future[SeedConfig] = {
+  def bootstrapSeed(system: ActorSystem, configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): Future[SeedConfig] = {
 
     def openUdpServer() = {
       // Check if no other seed on the machine
@@ -55,8 +55,9 @@ object SeedHelper {
       def broadcast(): Future[String] = {
         Future {
           val c = new DatagramSocket()
+          c.setBroadcast(true)
+          c.setSoTimeout(2000)
           try {
-            c.setBroadcast(true)
             val sendData = "LOOKING_FOR_A_SEED".getBytes
             val sendPacket = new DatagramPacket(sendData, sendData.length, InetAddress.getByName("255.255.255.255"), udpPort)
             c.send(sendPacket)
@@ -81,20 +82,31 @@ object SeedHelper {
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
     if (clientOnly) configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-NODE-CLIENT"]\n""")
-    Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
+    Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://amazing-system@$address:$port")
     val server = Try(openUdpServer()).isSuccess
     if (server) {
-      // TODO : kill it
-      ActorSystem("UPD-Bootstrap").actorOf(Props(classOf[UDPServer], address, port))
-      configBuilder.append( s"""akka.cluster.seed-nodes=["akka.tcp://${Env.systemName}@$address:$port"]""")
+      system.actorOf(Props(classOf[UDPServer], address, port))
+    }
+    tryToFindSeedNode().map { message =>
+      if (server) {
+        configBuilder.append(s"""akka.cluster.seed-nodes=["$message", "akka.tcp://distributed-map@$address:$port"]""")
+      } else {
+        configBuilder.append(s"""akka.cluster.seed-nodes=["$message"]""")
+      }
       config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
-      Future.successful(new SeedConfig(config, address, port, server))
-    } else {
-      tryToFindSeedNode().map { message =>
-        configBuilder.append( s"""akka.cluster.seed-nodes=["$message"]""")
+      new SeedConfig(config, address, port, server)
+    }(ec).recover {
+      case _ => {
+        if (server) {
+          configBuilder.append(s"""akka.cluster.seed-nodes=["akka.tcp://distributed-map@$address:$port"]""")
+        } else {
+          Logger("SeedHelper").error("I'm not an UDP server but no one to contact as seed ... Dafuq ???")
+        }
         config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
         new SeedConfig(config, address, port, server)
-      }(ec)
-    }
+      }
+    }(ec)
   }
 }
+
+

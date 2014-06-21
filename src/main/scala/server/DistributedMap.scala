@@ -67,6 +67,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
 
   private val db = Reference.empty[DB]()
   private val node = Reference.empty[ActorRef]()
+  private val bootSystem = Reference.empty[ActorSystem]()
   private val system = Reference.empty[ActorSystem]()
   private val cluster = Reference.empty[Cluster]()
   private val service = Reference.empty[DistributionService]()
@@ -83,7 +84,8 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     // TODO : check if sync is necessary
     // TODO : listen to cluster changes to impact consistent hashing, topology, synchro, etc ...
-    val fu = SeedHelper.bootstrapSeed(config, clientOnly).map { seeds =>
+    bootSystem <== ActorSystem("UDP-Server")
+    val fu = SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly).map { seeds =>
       system.set(ActorSystem(Env.systemName, seeds.config()))
       Client.system.set(system())
       cluster.set(Cluster(system()))
@@ -105,6 +107,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, client
   }
 
   def stop(): DistributedMapNode = {
+    bootSystem().shutdown()
     system().shutdown()
     db().close()
     this
