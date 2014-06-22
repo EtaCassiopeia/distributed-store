@@ -1,6 +1,7 @@
 import java.util.concurrent.{Executors, TimeUnit}
 
 import common.{IdGenerator, ExecutionContextExecutorServiceBridge}
+import config.Env
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
 import server.DistributedMapNode
@@ -71,13 +72,21 @@ class ApiSpec extends Specification with Tags {
       keys.foreach { key =>
         val targets = node1.targets(key)
         node2.targets(key) shouldEqual targets
+        node2.targets(key).size shouldEqual 5
         node3.targets(key) shouldEqual targets
+        node3.targets(key).size shouldEqual 5
         node4.targets(key) shouldEqual targets
+        node4.targets(key).size shouldEqual 5
         node5.targets(key) shouldEqual targets
+        node5.targets(key).size shouldEqual 5
         node6.targets(key) shouldEqual targets
+        node6.targets(key).size shouldEqual 5
         node7.targets(key) shouldEqual targets
+        node7.targets(key).size shouldEqual 5
         node8.targets(key) shouldEqual targets
+        node8.targets(key).size shouldEqual 5
         node9.targets(key) shouldEqual targets
+        node9.targets(key).size shouldEqual 5
       }
       success
     }
