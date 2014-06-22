@@ -148,7 +148,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] def targetAndNext(key: String): Seq[Member] = {
     val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
     var targets = Seq[Member]()
-    for (i <- 0 to replicates + 1) {
+    for (i <- 0 to replicates) {
       val next = (id + i) % (if (numberOfNodes() > 0) numberOfNodes() else 1)
       targets = targets :+ listOfNodes()(next)
     }
