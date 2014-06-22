@@ -12,6 +12,7 @@
   <logger name="AKKA-LB-CLIENTS" level="INFO" />
   <logger name="UDPServer" level="INFO" />
   <logger name="SeedHelper" level="INFO" />
+  <logger name="org.jgroups" level="ERROR" />
 
   <root level="ERROR">
     <appender-ref ref="STDOUT" />

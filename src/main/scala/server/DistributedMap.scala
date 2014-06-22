@@ -80,6 +80,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] val counterRebalancedKey = new AtomicLong(0L)
   private[this] val generator = IdGenerator(Random.nextInt(1024))
   private[this] val options = new Options()
+  private[this] val running = new AtomicBoolean(false)
   private[this] val membersList = new ConcurrentHashMap[String, Member]()
 
   options.createIfMissing(true)
@@ -100,6 +101,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   }
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
+    running.set(true)
     bootSystem <== ActorSystem("UDP-Server")
     seeds <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
     system <== ActorSystem(Env.systemName, seeds().config())
@@ -124,6 +126,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   }
 
   def stop(): DistributedMapNode = {
+    running.set(false)
     cluster().leave(cluster().selfAddress)
     bootSystem().shutdown()
     system().shutdown()
@@ -188,32 +191,34 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   }
 
   private[this] def blockingRebalance(): Unit = {
-    import scala.collection.JavaConversions._
-    implicit val ec = system().dispatcher
-    val start = System.currentTimeMillis()
-    val nodes = numberOfNodes()
-    val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey) }.toList
-    val rebalanced = new AtomicLong(0L)
-    val filtered = keys.filter { key =>
-      val t = target(key)
-      !t.address.toString.contains(cluster().selfAddress.toString)
-    }
-    Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
-    filtered.map { key =>
-      val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.getOrElse(throw new RuntimeException("No doc, WTF !!!"))
-      deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
-      val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
-      futureSet.onComplete {
-        case Success(opStatus) => counterRebalancedKey.incrementAndGet()
-        case Failure(e) => {
-          setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
-          rebalance()
-        }
+    if (running.get()) {
+      import scala.collection.JavaConversions._
+      implicit val ec = system().dispatcher
+      val start = System.currentTimeMillis()
+      val nodes = numberOfNodes()
+      val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList
+      val rebalanced = new AtomicLong(0L)
+      val filtered = keys.filter { key =>
+        val t = target(key)
+        !t.address.toString.contains(cluster().selfAddress.toString)
       }
-      Await.result(futureSet, Env.waitForRebalanceKey)
-      rebalanced.incrementAndGet()
+      Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
+      filtered.map { key =>
+        val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.getOrElse(throw new RuntimeException("No doc, WTF !!!"))
+        deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
+        val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
+        futureSet.onComplete {
+          case Success(opStatus) => counterRebalancedKey.incrementAndGet()
+          case Failure(e) => {
+            setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
+            rebalance()
+          }
+        }
+        Await.result(futureSet, Env.waitForRebalanceKey)
+        rebalanced.incrementAndGet()
+      }
+      Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
     }
-    Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
