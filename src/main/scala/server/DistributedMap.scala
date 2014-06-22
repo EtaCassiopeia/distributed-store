@@ -109,7 +109,10 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
       db <== Iq80DBFactory.factory.open(path, options)
     }
     val wait = seeds().joinCluster(cluster())
-    Await.result(wait, Env.waitForCluster)
+    Try { Await.result(wait, Env.waitForCluster) } match {
+      case Failure(e) => seeds().forceJoin()
+      case _ =>
+    }
     def syncNode(): Unit = {
       system().scheduler.scheduleOnce(Env.autoResync) {
         Try { blockingRebalance() }

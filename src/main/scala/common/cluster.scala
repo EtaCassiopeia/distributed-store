@@ -7,6 +7,7 @@ import java.util.concurrent.{ConcurrentLinkedQueue, TimeUnit}
 import akka.actor.ActorSystem
 import akka.cluster.Cluster
 import com.typesafe.config.{Config, ConfigFactory}
+import config.Env
 import org.jgroups.{JChannel, Message, ReceiverAdapter}
 
 import scala.collection.JavaConversions._
@@ -27,7 +28,7 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
   def joinCluster(cluster: Cluster): Future[Unit] = {
     joined.set(true)
     clusterRef.set(cluster)
-    addresses.offer(akka.actor.Address("akka.tcp", "amazing-system", address, port))
+    addresses.offer(akka.actor.Address("akka.tcp", Env.systemName, address, port))
     p.future
   }
   private[this] def joinIfReady() = {
@@ -37,11 +38,16 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
       p.trySuccess(())
     }
   }
+  def forceJoin(): Unit = {
+    clusterRef.get().joinSeedNodes(scala.collection.immutable.Seq().++(addresses.toSeq))
+    noMore.set(true)
+    p.trySuccess(())
+  }
   private[common] def newSeed(message: String) = {
     if (joined.get() && !noMore.get()) {
       message.split("\\:").toList match {
         case addr :: prt :: Nil => {
-          addresses.offer(akka.actor.Address("akka.tcp", "amazing-system", addr, prt.toInt))
+          addresses.offer(akka.actor.Address("akka.tcp", Env.systemName, addr, prt.toInt))
           joinIfReady()
         }
       }
@@ -70,9 +76,9 @@ object SeedHelper {
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
     config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
-    Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://amazing-system@$address:$port")
+    Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
     val channel = new JChannel()
-    channel.connect("amazing-store")
+    channel.connect("distributed-map")
     val seeds = new SeedConfig(config, channel, address, port)
     channel.setReceiver(new ReceiverAdapter() {
       override def receive(msg: Message): Unit = {
@@ -83,10 +89,14 @@ object SeedHelper {
       }
     })
     def broadcastWhoIAm(duration: FiniteDuration)(implicit ec: ExecutionContext): Unit = {
-      system.scheduler.scheduleOnce(duration) {
-        val msg = new Message(null, channel.getAddress, s"$address:$port")
-        channel.send(msg)
-        broadcastWhoIAm(Duration(10, TimeUnit.SECONDS))(ec)
+      Try {
+        system.scheduler.scheduleOnce(duration) {
+          val msg = new Message(null, channel.getAddress, s"$address:$port")
+          Try {
+            channel.send(msg)
+            broadcastWhoIAm(Duration(2, TimeUnit.SECONDS))(ec)
+          }
+        }
       }
     }
     broadcastWhoIAm(Duration(1, TimeUnit.SECONDS))(ec)

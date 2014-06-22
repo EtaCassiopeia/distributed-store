@@ -16,7 +16,7 @@ object Env {
   val workers = 10
   val UTF8 = Charset.forName("UTF-8")
   val autoResync = Duration(5, TimeUnit.MINUTES)            // TODO : from file
-  val waitForCluster = Duration(10, TimeUnit.SECONDS)       // TODO : from file
+  val waitForCluster = Duration(5, TimeUnit.SECONDS)       // TODO : from file
   val rebalanceConflate = Duration(5, TimeUnit.SECONDS)     // TODO : from file
   val rebalanceRetry = 3                                    // TODO : from file
   val waitForRebalanceKey = Duration(10, TimeUnit.SECONDS)  // TODO : from file
