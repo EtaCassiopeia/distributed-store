@@ -22,6 +22,8 @@ libraryDependencies += "com.typesafe"              % "config"                   
 
 libraryDependencies += "com.codahale.metrics"      % "metrics-core"              % "3.0.2"
 
+libraryDependencies += "org.jgroups"               % "jgroups"                   % "3.4.4.Final"
+
 libraryDependencies += "org.specs2"                %% "specs2"                   % "2.3.12"            % "test"
 
 

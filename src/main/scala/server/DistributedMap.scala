@@ -73,6 +73,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] val bootSystem = Reference.empty[ActorSystem]()
   private[this] val system = Reference.empty[ActorSystem]()
   private[this] val cluster = Reference.empty[Cluster]()
+  private[this] val seeds = Reference.empty[SeedConfig]()
   private[this] val counterRead = new AtomicLong(0L)
   private[this] val counterWrite = new AtomicLong(0L)
   private[this] val counterDelete = new AtomicLong(0L)
@@ -100,20 +101,15 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     bootSystem <== ActorSystem("UDP-Server")
-    val fu = SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly).map { seeds =>
-      system <== ActorSystem(Env.systemName, seeds.config())
-      cluster <== Cluster(system())
-      if (!clientOnly) {
-        node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
-        db <== Iq80DBFactory.factory.open(path, options)
-      }
-      seeds.joinClusterIfSeed(cluster())
+    seeds <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
+    system <== ActorSystem(Env.systemName, seeds().config())
+    cluster <== Cluster(system())
+    if (!clientOnly) {
+      node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+      db <== Iq80DBFactory.factory.open(path, options)
     }
-    fu.onComplete {
-      case Failure(e) => Logger.error("Something wrong happened", e)
-      case _ =>
-    }
-    Await.result(fu, Env.waitForCluster)
+    val wait = seeds().joinCluster(cluster())
+    Await.result(wait, Env.waitForCluster)
     def syncNode(): Unit = {
       system().scheduler.scheduleOnce(Env.autoResync) {
         Try { blockingRebalance() }
@@ -129,6 +125,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     bootSystem().shutdown()
     system().shutdown()
     db().close()
+    seeds().shutdown()
     this
   }
 
@@ -166,7 +163,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     }).map { fuStatuses =>
       val successfulStatuses = fuStatuses.filter(_.successful)
       val first = successfulStatuses.head
-      val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _)
+      val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
       if (valid >= quorum()) first
       else {
         Logger.debug(s"Operation failed : Head was $first, quorum was $valid success / ${quorum()} mandatory")
