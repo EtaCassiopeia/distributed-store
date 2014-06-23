@@ -1,7 +1,6 @@
 package server
 
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import akka.actor._
@@ -16,9 +15,9 @@ import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
+import scala.collection.JavaConversions._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
-import collection.JavaConversions._
 
 class NodeServiceWorker(node: DistributedMapNode) extends Actor {
   override def receive: Receive = {
@@ -47,17 +46,14 @@ class NodeService(node: DistributedMapNode) extends Actor {
     case o @ SetOperation(key, value, t, id) => worker(key) forward o
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case MemberUp(member) => {
-      node.addMember(member)
       node.displayState()
       node.rebalance()
     }
     case UnreachableMember(member) => {
-      node.removeMember(member)
       node.displayState()
       node.rebalance()
     }
     case MemberRemoved(member, previousStatus) => {
-      node.removeMember(member)
       node.displayState()
       node.rebalance()
     }
@@ -95,7 +91,14 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     }(ec)
   }
 
-  def members(): List[Member] = cluster().state.getMembers.toList
+  private[server] def members(): List[Member] = {
+    val md5 = Hashing.md5()
+    cluster().state.getMembers.toList.sortWith { (member1, member2) =>
+      val hash1 = md5.hashString(member1.address.toString, Env.UTF8).asLong()
+      val hash2 = md5.hashString(member2.address.toString, Env.UTF8).asLong()
+      hash1.compareTo(hash2) < 0
+    }
+  }
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     running.set(true)
@@ -137,19 +140,33 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
     Future.sequence(targets.map { member =>
-      system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
-        case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+      Try {
+        system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
+          case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+        }
+      } match {
+        case Success(f) => f
+        case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
       }
     }).map { fuStatuses =>
       val successfulStatuses = fuStatuses.filter(_.successful)
-      val first = successfulStatuses.head
-      val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
-      if (valid >= quorum()) first
-      else {
-        Logger.error(s"Operation failed : Head was $first, quorum was $valid success / ${quorum()} mandatory")
-        // TODO : cancel operation if no succeed ?
-        // TODO : transac mode
-        OpStatus(false, first.key, None, first.operationId, first.timestamp)
+      successfulStatuses.headOption match {
+        case Some(first) => {
+          val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
+          if (valid != fuStatuses.size) rebalance()
+          if (valid >= quorum()) first
+          else {
+            Logger.error(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
+            // TODO : rollback operation if no succeed ?
+            // TODO : transac mode
+            OpStatus(false, first.key, None, first.timestamp, first.operationId)
+          }
+        }
+        case None => {
+          // TODO : dafuq !!!
+          Logger.error(s"Operation failed : no response !!!")
+          OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
+        }
       }
     }
   }
@@ -171,28 +188,33 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
       val nodes = numberOfNodes()
-      val keys = db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList
-      val rebalanced = new AtomicLong(0L)
-      val filtered = keys.filter { key =>
-        val t = target(key)
-        !t.address.toString.contains(cluster().selfAddress.toString)
-      }
-      Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
-      filtered.map { key =>
-        val doc = getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.getOrElse(throw new RuntimeException("No doc, WTF !!!"))
-        deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
-        val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
-        futureSet.onComplete {
-          case Success(opStatus) => counterRebalancedKey.incrementAndGet()
-          case Failure(e) => {
-            setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
-            rebalance()
+      Try(db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList) match {
+        case Success(keys) => {
+          val rebalanced = new AtomicLong(0L)
+          val filtered = keys.filter { key =>
+            val t = target(key)
+            !t.address.toString.contains(cluster().selfAddress.toString)
           }
+          Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
+          filtered.map { key =>
+            getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.map { doc =>
+              deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
+              val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
+              futureSet.onComplete {
+                case Success(opStatus) => counterRebalancedKey.incrementAndGet()
+                case Failure(e) => {
+                  setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
+                  rebalance()
+                }
+              }
+              Await.result(futureSet, Env.waitForRebalanceKey)
+              rebalanced.incrementAndGet()
+            }
+          }
+          Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
         }
-        Await.result(futureSet, Env.waitForRebalanceKey)
-        rebalanced.incrementAndGet()
+        case _ => Logger.error("Error while accessing the node persistence unit !!!!")
       }
-      Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
     }
   }
 
@@ -219,27 +241,36 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   }
 
   def displayStats(): DistributedMapNode = {
-    Logger.info(s"[$name] read ops ${counterRead.get()} / write ops ${counterWrite.get()} / delete ops ${counterDelete.get()} / rebalanced ${counterRebalancedKey.get()}")
+    val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
+    val stats = Json.obj(
+      "name" -> name,
+      "readOps" -> counterRead.get(),
+      "writeOps" -> counterWrite.get(),
+      "deleteOps" -> counterDelete.get(),
+      "balanceKeys" -> counterRebalancedKey.get(),
+      "keys" -> keys
+    )
+    Logger.info(Json.prettyPrint(stats))
     this
   }
 
   // Client API
-  def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
-  def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
-  def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
-  def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
+  private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
   }

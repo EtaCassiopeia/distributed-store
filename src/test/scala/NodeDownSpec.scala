@@ -77,7 +77,7 @@ class NodeDownSpec extends Specification with Tags {
 
     "Delete stuff" in {
       keys.foreach { key =>
-        Await.result(node1.delete(key), timeout)
+        Await.result(client.delete(key), timeout)
       }
       success
     }

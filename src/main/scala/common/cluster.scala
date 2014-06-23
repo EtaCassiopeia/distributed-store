@@ -39,7 +39,6 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
     }
   }
   def forceJoin(): Unit = {
-    println(s"========== >> force join ${addresses.toSeq}")
     clusterRef.get().joinSeedNodes(scala.collection.immutable.Seq().++(addresses.toSeq))
     noMore.set(true)
     p.trySuccess(())

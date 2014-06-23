@@ -11,14 +11,14 @@ import collection.JavaConversions._
 
 trait ClusterAware { self: DistributedMapNode =>
 
-  private[this] val membersList = new ConcurrentHashMap[String, Member]()
+  //private[this] val membersList = new ConcurrentHashMap[String, Member]()
 
   private[server] def listOfNodes(): Seq[Member] = members().filter(_.getRoles.contains(Env.nodeRole))
 
   private[server] def numberOfNodes(): Int = listOfNodes().size
 
   // For testing purpose
-  def targets(key: String): Seq[Address] = targetAndNext(key).map(_.address)
+  private[server] def targets(key: String): Seq[Address] = targetAndNext(key).map(_.address)
 
   private[server] def target(key: String): Member = {
     val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
@@ -37,8 +37,8 @@ trait ClusterAware { self: DistributedMapNode =>
 
   private[server] def quorum(): Int = ((self.replicatesNbr() + 1) / 2) + 1
 
-  private[server] def addMember(member: Member) = if (!membersList.containsKey(member)) membersList.put(member.address.toString, member)
-  private[server] def removeMember(member: Member) = if (membersList.containsKey(member.address.toString)) membersList.remove(member.address.toString)
+  //private[server] def addMember(member: Member) = if (!membersList.containsKey(member)) membersList.put(member.address.toString, member)
+  //private[server] def removeMember(member: Member) = if (membersList.containsKey(member.address.toString)) membersList.remove(member.address.toString)
   //private[server] def members(): List[Member] = membersList.values().toList.sortBy(_.address.toString)
   private[server] def displayState() = {
     Logger("CLIENTS_WATCHER").debug(s"----------------------------------------------------------------------------")

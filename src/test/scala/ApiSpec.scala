@@ -8,8 +8,18 @@ import server.{DistributedMapNode, NodeClient}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext}
 
+package object server {
+  object TargetAccessor {
+    def targets(node: DistributedMapNode, key: String) = {
+      node.targets(key)
+    }
+  }
+}
+
 class ApiSpec extends Specification with Tags {
   sequential
+
+  import server.TargetAccessor
 
   "Distributed Map" should {
 
@@ -64,30 +74,30 @@ class ApiSpec extends Specification with Tags {
 
     "Delete stuff" in {
       keys.foreach { key =>
-        Await.result(node1.delete(key), timeout)
+        Await.result(client.delete(key), timeout)
       }
       success
     }
 
     "Always target same nodes in the ring" in {
       keys.foreach { key =>
-        val targets = node1.targets(key)
-        node2.targets(key) shouldEqual targets
-        node2.targets(key).size shouldEqual 5
-        node3.targets(key) shouldEqual targets
-        node3.targets(key).size shouldEqual 5
-        node4.targets(key) shouldEqual targets
-        node4.targets(key).size shouldEqual 5
-        node5.targets(key) shouldEqual targets
-        node5.targets(key).size shouldEqual 5
-        node6.targets(key) shouldEqual targets
-        node6.targets(key).size shouldEqual 5
-        node7.targets(key) shouldEqual targets
-        node7.targets(key).size shouldEqual 5
-        node8.targets(key) shouldEqual targets
-        node8.targets(key).size shouldEqual 5
-        node9.targets(key) shouldEqual targets
-        node9.targets(key).size shouldEqual 5
+        val targets =  TargetAccessor.targets(node1, key)
+        TargetAccessor.targets(node2, key) shouldEqual targets
+        TargetAccessor.targets(node2, key).size shouldEqual 5
+        TargetAccessor.targets(node3, key) shouldEqual targets
+        TargetAccessor.targets(node3, key).size shouldEqual 5
+        TargetAccessor.targets(node4, key) shouldEqual targets
+        TargetAccessor.targets(node4, key).size shouldEqual 5
+        TargetAccessor.targets(node5, key) shouldEqual targets
+        TargetAccessor.targets(node5, key).size shouldEqual 5
+        TargetAccessor.targets(node6, key) shouldEqual targets
+        TargetAccessor.targets(node6, key).size shouldEqual 5
+        TargetAccessor.targets(node7, key) shouldEqual targets
+        TargetAccessor.targets(node7, key).size shouldEqual 5
+        TargetAccessor.targets(node8, key) shouldEqual targets
+        TargetAccessor.targets(node8, key).size shouldEqual 5
+        TargetAccessor.targets(node9, key) shouldEqual targets
+        TargetAccessor.targets(node9, key).size shouldEqual 5
       }
       success
     }
@@ -96,15 +106,15 @@ class ApiSpec extends Specification with Tags {
       for (i <- 0 to 10) {
         val key = IdGenerator.uuid
         for (j <- 0 to 100) {
-          val targets = node1.targets(key)
-          node2.targets(key) shouldEqual targets
-          node3.targets(key) shouldEqual targets
-          node4.targets(key) shouldEqual targets
-          node5.targets(key) shouldEqual targets
-          node6.targets(key) shouldEqual targets
-          node7.targets(key) shouldEqual targets
-          node8.targets(key) shouldEqual targets
-          node9.targets(key) shouldEqual targets
+          val targets = TargetAccessor.targets(node1, key)
+          TargetAccessor.targets(node2, key) shouldEqual targets
+          TargetAccessor.targets(node3, key) shouldEqual targets
+          TargetAccessor.targets(node4, key) shouldEqual targets
+          TargetAccessor.targets(node5, key) shouldEqual targets
+          TargetAccessor.targets(node6, key) shouldEqual targets
+          TargetAccessor.targets(node7, key) shouldEqual targets
+          TargetAccessor.targets(node8, key) shouldEqual targets
+          TargetAccessor.targets(node9, key) shouldEqual targets
         }
       }
       success
