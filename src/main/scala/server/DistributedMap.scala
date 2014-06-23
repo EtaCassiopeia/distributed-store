@@ -47,19 +47,16 @@ class NodeService(node: DistributedMapNode) extends Actor {
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case MemberUp(member) => {
       node.updateMembers()
-      node.updateNodes()
       //node.displayState()
       node.rebalance()
     }
     case UnreachableMember(member) => {
       node.updateMembers()
-      node.updateNodes()
       //node.displayState()
       node.rebalance()
     }
     case MemberRemoved(member, previousStatus) => {
       node.updateMembers()
-      node.updateNodes()
       //node.displayState()
       node.rebalance()
     }
