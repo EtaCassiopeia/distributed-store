@@ -3,10 +3,10 @@ import java.util.concurrent.{Executors, TimeUnit}
 import common.IdGenerator
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.{OpStatus, DistributedMapNode}
+import server.{DistributedMapNode, NodeClient, OpStatus}
 
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Future, Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 class LoadSpec extends Specification with Tags {
   sequential
@@ -40,6 +40,7 @@ class LoadSpec extends Specification with Tags {
     val node7 = DistributedMapNode(s"node7-${IdGenerator.uuid}", 4)
     val node8 = DistributedMapNode(s"node8-${IdGenerator.uuid}", 4)
     val node9 = DistributedMapNode(s"node9-${IdGenerator.uuid}", 4)
+    val client = NodeClient()
 
     "Start some nodes" in {
       node1.start()
@@ -51,6 +52,7 @@ class LoadSpec extends Specification with Tags {
       node7.start()
       node8.start()
       node9.start()
+      client.start()
       Thread.sleep(6000)   // Wait for cluster setup
       success
     }
@@ -58,7 +60,7 @@ class LoadSpec extends Specification with Tags {
     "Insert some stuff" in {
       performBy(100)(1000) {
         val id = IdGenerator.uuid
-        node1.set(id, Json.obj(
+        client.set(id, Json.obj(
           "Hello" -> "World", "key" -> id
         ))
       }
@@ -75,6 +77,7 @@ class LoadSpec extends Specification with Tags {
       node7.displayStats().stop().destroy()
       node8.displayStats().stop().destroy()
       node9.displayStats().stop().destroy()
+      client.stop()
       success
     }
   }

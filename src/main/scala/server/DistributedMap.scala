@@ -16,7 +16,6 @@ import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
-import scala.collection.JavaConversions._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
 import collection.JavaConversions._
@@ -66,7 +65,7 @@ class NodeService(node: DistributedMapNode) extends Actor {
   }
 }
 
-class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, config: Configuration, path: File, clientOnly: Boolean = false) {
+class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, config: Configuration, path: File, clientOnly: Boolean = false) extends ClusterAware {
 
   private[this] val db = Reference.empty[DB]()
   private[this] val node = Reference.empty[ActorRef]()
@@ -81,47 +80,41 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   private[this] val generator = IdGenerator(Random.nextInt(1024))
   private[this] val options = new Options()
   private[this] val running = new AtomicBoolean(false)
-  private[this] val membersList = new ConcurrentHashMap[String, Member]()
+  private[this] val run = new AtomicBoolean(false)
 
   options.createIfMissing(true)
   Logger.configure()
 
   if (replicates < Env.minimumReplicates) throw new RuntimeException(s"Cannot have less than ${Env.minimumReplicates} replicates")
 
-  private[server] def addMember(member: Member) = if (!membersList.containsKey(member)) membersList.put(member.address.toString, member)
-  private[server] def removeMember(member: Member) = if (membersList.containsKey(member.address.toString)) membersList.remove(member.address.toString)
-  private[server] def members(): List[Member] = membersList.values().toList.sortBy(_.address.toString)
-  private[server] def displayState() = {
-    Logger("CLIENTS_WATCHER").debug(s"----------------------------------------------------------------------------")
-    Logger("CLIENTS_WATCHER").debug(s"Cluster members are : ")
-    members().foreach { member =>
-      Logger("CLIENTS_WATCHER").debug(s"==> ${member.address} :: ${member.getRoles} => ${member.status}")
-    }
-    Logger("CLIENTS_WATCHER").debug(s"----------------------------------------------------------------------------")
+  private[server] def replicatesNbr() = replicates
+  private[server] def syncNode(ec: ExecutionContext): Unit = {
+    system().scheduler.scheduleOnce(Env.autoResync) {
+      Try { blockingRebalance() }
+      syncNode(ec)
+    }(ec)
   }
+
+  def members(): List[Member] = cluster().state.getMembers.toList
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
     running.set(true)
     bootSystem <== ActorSystem("UDP-Server")
-    seeds <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
-    system <== ActorSystem(Env.systemName, seeds().config())
-    cluster <== Cluster(system())
-    if (!clientOnly) {
-      node <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
-      db <== Iq80DBFactory.factory.open(path, options)
-    }
+    seeds      <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
+    system     <== ActorSystem(Env.systemName, seeds().config())
+    cluster    <== Cluster(system())
+    node       <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+    if (!clientOnly) db <== Iq80DBFactory.factory.open(path, options)
     val wait = seeds().joinCluster(cluster())
+    // TODO : to wait or not to wait
     Try { Await.result(wait, Env.waitForCluster) } match {
       case Failure(e) => seeds().forceJoin()
       case _ =>
     }
-    def syncNode(): Unit = {
-      system().scheduler.scheduleOnce(Env.autoResync) {
-        Try { blockingRebalance() }
-        syncNode()
-      }
+    // TODO : run it when needed
+    if (!clientOnly) {
+      //syncNode()
     }
-    //syncNode()
     this
   }
 
@@ -130,37 +123,18 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     cluster().leave(cluster().selfAddress)
     bootSystem().shutdown()
     system().shutdown()
-    db().close()
     seeds().shutdown()
+    // TODO : wait to finish current operations ?
+    if (!clientOnly) db().close()
     this
   }
 
   def destroy(): Unit = {
+    // TODO : wait to finish current operations ?
     Iq80DBFactory.factory.destroy(path, options)
   }
 
-  private[this] def listOfNodes(): Seq[Member] = members().filter(_.getRoles.contains(Env.nodeRole))
-
-  private[this] def numberOfNodes(): Int = listOfNodes().size
-
-  private[this] def target(key: String): Member = {
-    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
-    listOfNodes()(id % (if (numberOfNodes() > 0) numberOfNodes() else 1))
-  }
-
-  private[this] def targetAndNext(key: String): Seq[Member] = {
-    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
-    var targets = Seq[Member]()
-    for (i <- 0 to replicates) {
-      val next = (id + i) % (if (numberOfNodes() > 0) numberOfNodes() else 1)
-      targets = targets :+ listOfNodes()(next)
-    }
-    targets
-  }
-
-  private[this] def quorum(): Int = ((replicates + 1) / 2) + 1
-
-  private[this] def performAndWaitForQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
+  private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
     Future.sequence(targets.map { member =>
       system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
@@ -172,15 +146,16 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
       val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
       if (valid >= quorum()) first
       else {
-        Logger.debug(s"Operation failed : Head was $first, quorum was $valid success / ${quorum()} mandatory")
+        Logger.error(s"Operation failed : Head was $first, quorum was $valid success / ${quorum()} mandatory")
+        // TODO : cancel operation if no succeed ?
+        // TODO : transac mode
         OpStatus(false, first.key, None, first.operationId, first.timestamp)
       }
     }
   }
 
-  private[this] val run = new AtomicBoolean(false)
-
   private[server] def rebalance(): Unit = {
+    // TODO : enqueue calls ?
     implicit val ec = system().dispatcher
     if (run.compareAndSet(false, true)) {
       system().scheduler.scheduleOnce(Env.rebalanceConflate) {
@@ -191,7 +166,7 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   }
 
   private[this] def blockingRebalance(): Unit = {
-    if (running.get()) {
+    if (running.get() && !clientOnly) {
       import scala.collection.JavaConversions._
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
@@ -248,29 +223,25 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
     this
   }
 
-  // For testing purpose
-  def targets(key: String): Seq[Address] = targetAndNext(key).map(_.address)
-
   // Client API
-
   def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
-    performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
-    performAndWaitForQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
-    performAndWaitForQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
+    performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
   }
 
   def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val targets = targetAndNext(key)
-    performAndWaitForQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
+    performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
   }
 }
 

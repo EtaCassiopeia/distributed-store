@@ -39,6 +39,7 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
     }
   }
   def forceJoin(): Unit = {
+    println(s"========== >> force join ${addresses.toSeq}")
     clusterRef.get().joinSeedNodes(scala.collection.immutable.Seq().++(addresses.toSeq))
     noMore.set(true)
     p.trySuccess(())
@@ -50,6 +51,7 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
           addresses.offer(akka.actor.Address("akka.tcp", Env.systemName, addr, prt.toInt))
           joinIfReady()
         }
+        case _ =>
       }
     }
   }
@@ -75,6 +77,9 @@ object SeedHelper {
     val port = freePort
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
+    if (clientOnly) {
+      configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-CLIENT"]\n""")
+    }
     config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
     Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
     val channel = new JChannel()
@@ -99,7 +104,7 @@ object SeedHelper {
         }
       }
     }
-    broadcastWhoIAm(Duration(1, TimeUnit.SECONDS))(ec)
+    if (!clientOnly) broadcastWhoIAm(Duration(1, TimeUnit.SECONDS))(ec)
     seeds
   }
 }

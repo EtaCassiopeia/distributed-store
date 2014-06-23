@@ -1,13 +1,12 @@
 import java.util.concurrent.{Executors, TimeUnit}
 
-import common.{IdGenerator, ExecutionContextExecutorServiceBridge}
-import config.Env
+import common.IdGenerator
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.DistributedMapNode
+import server.{DistributedMapNode, NodeClient}
 
-import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext}
 
 class ApiSpec extends Specification with Tags {
   sequential
@@ -26,6 +25,7 @@ class ApiSpec extends Specification with Tags {
     val node7 = DistributedMapNode(s"node7-${IdGenerator.uuid}", 4)
     val node8 = DistributedMapNode(s"node8-${IdGenerator.uuid}", 4)
     val node9 = DistributedMapNode(s"node9-${IdGenerator.uuid}", 4)
+    val client = NodeClient()
     var keys = Seq[String]()
 
     "Start some nodes" in {
@@ -38,6 +38,7 @@ class ApiSpec extends Specification with Tags {
       node7.start()
       node8.start()
       node9.start()
+      client.start()
       Thread.sleep(3000)   // Wait for cluster setup
       success
     }
@@ -46,7 +47,7 @@ class ApiSpec extends Specification with Tags {
       for (i <- 0 to 1000) {
         val id = IdGenerator.uuid
         keys = keys :+ id
-        Await.result( node1.set(id, Json.obj(
+        Await.result( client.set(id, Json.obj(
           "Hello" -> "World", "key" -> id
         )), timeout)
       }
@@ -54,9 +55,9 @@ class ApiSpec extends Specification with Tags {
     }
 
     "Read some stuff" in {
-      Await.result(node1.get("key3"), timeout) should beNone
+      Await.result(client.get("key3"), timeout) should beNone
       keys.foreach { key =>
-        Await.result(node1.get(key), timeout) shouldEqual Some(Json.obj("Hello" -> "World", "key" -> key))
+        Await.result(client.get(key), timeout) shouldEqual Some(Json.obj("Hello" -> "World", "key" -> key))
       }
       success
     }
@@ -119,6 +120,7 @@ class ApiSpec extends Specification with Tags {
       node7.displayStats().stop().destroy()
       node8.displayStats().stop().destroy()
       node9.displayStats().stop().destroy()
+      client.stop()
       success
     }
   }

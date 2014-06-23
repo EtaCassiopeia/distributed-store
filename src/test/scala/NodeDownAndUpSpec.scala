@@ -4,10 +4,10 @@ import java.util.concurrent.{Executors, TimeUnit}
 import common.{IdGenerator, Logger}
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.DistributedMapNode
+import server.{DistributedMapNode, NodeClient}
 
-import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext}
 
 class NodeDownAndUpSpec extends Specification with Tags {
   sequential
@@ -26,6 +26,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
     val node7 = DistributedMapNode(s"node7-${IdGenerator.uuid}", 4)
     val node8 = DistributedMapNode(s"node8-${IdGenerator.uuid}", 4)
     val node9 = DistributedMapNode(s"node9-${IdGenerator.uuid}", 4)
+    val client = NodeClient()
     var keys = Seq[String]()
     val counterOk = new AtomicLong(0L)
     val counterKo = new AtomicLong(0L)
@@ -40,6 +41,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
       node7.start()
       node8.start()
       node9.start()
+      client.start()
       Thread.sleep(6000)   // Wait for cluster setup
       success
     }
@@ -48,7 +50,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
       for (i <- 0 to 1000) {
         val id = IdGenerator.uuid
         keys = keys :+ id
-        Await.result( node1.set(id, Json.obj(
+        Await.result( client.set(id, Json.obj(
           "Hello" -> "World", "key" -> id
         )), timeout)
       }
@@ -67,7 +69,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
       for (i <- 0 to 1000) {
         val id = IdGenerator.uuid
         keys = keys :+ id
-        Await.result( node1.set(id, Json.obj(
+        Await.result( client.set(id, Json.obj(
           "Hello" -> "World", "key" -> id
         )), timeout)
       }
@@ -85,7 +87,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
     "Read some stuff" in {
       keys.foreach { key =>
         val expected = Some(Json.obj("Hello" -> "World", "key" -> key))
-        if (Await.result(node1.get(key), timeout) == expected) counterOk.incrementAndGet()
+        if (Await.result(client.get(key), timeout) == expected) counterOk.incrementAndGet()
         else counterKo.incrementAndGet()
       }
       success
@@ -108,6 +110,7 @@ class NodeDownAndUpSpec extends Specification with Tags {
       node7.displayStats().stop().destroy()
       node8.displayStats().stop().destroy()
       node9.displayStats().stop().destroy()
+      client.stop()
       Thread.sleep(5000)
       Logger.info(s"Read OK ${counterOk.get()}")
       Logger.info(s"Read KO ${counterKo.get()}")
