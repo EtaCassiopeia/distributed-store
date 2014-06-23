@@ -46,15 +46,21 @@ class NodeService(node: DistributedMapNode) extends Actor {
     case o @ SetOperation(key, value, t, id) => worker(key) forward o
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case MemberUp(member) => {
-      node.displayState()
+      node.updateMembers()
+      node.updateNodes()
+      //node.displayState()
       node.rebalance()
     }
     case UnreachableMember(member) => {
-      node.displayState()
+      node.updateMembers()
+      node.updateNodes()
+      //node.displayState()
       node.rebalance()
     }
     case MemberRemoved(member, previousStatus) => {
-      node.displayState()
+      node.updateMembers()
+      node.updateNodes()
+      //node.displayState()
       node.rebalance()
     }
     case _ =>
@@ -63,20 +69,21 @@ class NodeService(node: DistributedMapNode) extends Actor {
 
 class DistributedMapNode(name: String, config: Configuration, path: File, env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
 
-  private[this] val db = Reference.empty[DB]()
-  private[this] val node = Reference.empty[ActorRef]()
-  private[this] val bootSystem = Reference.empty[ActorSystem]()
-  private[this] val system = Reference.empty[ActorSystem]()
-  private[this] val cluster = Reference.empty[Cluster]()
-  private[this] val seeds = Reference.empty[SeedConfig]()
-  private[this] val counterRead = new AtomicLong(0L)
-  private[this] val counterWrite = new AtomicLong(0L)
-  private[this] val counterDelete = new AtomicLong(0L)
-  private[this] val counterRebalancedKey = new AtomicLong(0L)
-  private[this] val generator = IdGenerator(Random.nextInt(1024))
-  private[this] val options = new Options()
-  private[this] val running = new AtomicBoolean(false)
-  private[this] val run = new AtomicBoolean(false)
+  private[server] val db = Reference.empty[DB]()
+  private[server] val node = Reference.empty[ActorRef]()
+  private[server] val bootSystem = Reference.empty[ActorSystem]()
+  private[server] val system = Reference.empty[ActorSystem]()
+  private[server] val cluster = Reference.empty[Cluster]()
+  private[server] val seeds = Reference.empty[SeedConfig]()
+  private[server] val counterRead = new AtomicLong(0L)
+  private[server] val counterWrite = new AtomicLong(0L)
+  private[server] val counterDelete = new AtomicLong(0L)
+  private[server] val counterRebalancedKey = new AtomicLong(0L)
+  private[server] val counterCacheSync = new AtomicLong(0L)
+  private[server] val generator = IdGenerator(Random.nextInt(1024))
+  private[server] val options = new Options()
+  private[server] val running = new AtomicBoolean(false)
+  private[server] val run = new AtomicBoolean(false)
 
   options.createIfMissing(true)
   Logger.configure()
@@ -89,15 +96,6 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
       Try { blockingRebalance() }
       syncNode(ec)
     }(ec)
-  }
-
-  private[server] def members(): List[Member] = {
-    val md5 = Hashing.md5()
-    cluster().state.getMembers.toList.sortWith { (member1, member2) =>
-      val hash1 = md5.hashString(member1.address.toString, Env.UTF8).asLong()
-      val hash2 = md5.hashString(member2.address.toString, Env.UTF8).asLong()
-      hash1.compareTo(hash2) < 0
-    }
   }
 
   def start()(implicit ec: ExecutionContext): DistributedMapNode = {
@@ -248,6 +246,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
       "writeOps" -> counterWrite.get(),
       "deleteOps" -> counterDelete.get(),
       "balanceKeys" -> counterRebalancedKey.get(),
+      "cacheSync" -> counterCacheSync.get(),
       "keys" -> keys
     )
     Logger.info(Json.prettyPrint(stats))

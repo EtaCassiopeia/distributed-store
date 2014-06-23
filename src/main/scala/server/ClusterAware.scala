@@ -1,19 +1,37 @@
 package server
 
-import java.util.concurrent.ConcurrentHashMap
-
 import akka.actor.Address
 import akka.cluster.Member
 import com.google.common.hash.{HashCode, Hashing}
-import common.Logger
+import common.{Reference, Logger}
 import config.Env
 import collection.JavaConversions._
 
 trait ClusterAware { self: DistributedMapNode =>
 
-  //private[this] val membersList = new ConcurrentHashMap[String, Member]()
+  private[server] val membersCache = Reference.empty[Seq[Member]]()
+  private[server] val nodesCache = Reference.empty[Seq[Member]]()
 
-  private[server] def listOfNodes(): Seq[Member] = members().filter(_.getRoles.contains(Env.nodeRole))
+  private[server] def members(): Seq[Member] = membersCache.getOrElse(updateMembers())
+
+  private[server] def updateNodes(): Seq[Member] = {
+    nodesCache <== members().filter(_.getRoles.contains(Env.nodeRole))
+    counterCacheSync.incrementAndGet()
+    nodesCache()
+  }
+
+  private[server] def updateMembers(): Seq[Member] = {
+    //val md5 = Hashing.md5()
+    membersCache <== cluster().state.getMembers.toSeq.sortWith { (member1, member2) =>
+      val hash1 = member1.address.toString.hashCode //md5.hashString(member1.address.toString, Env.UTF8).asLong()
+      val hash2 = member2.address.toString.hashCode //md5.hashString(member2.address.toString, Env.UTF8).asLong()
+      hash1.compareTo(hash2) < 0
+    }
+    counterCacheSync.incrementAndGet()
+    membersCache()
+  }
+
+  private[server] def listOfNodes(): Seq[Member] = members().filter(_.getRoles.contains(Env.nodeRole))//nodesCache.getOrElse(updateNodes())
 
   private[server] def numberOfNodes(): Int = listOfNodes().size
 

@@ -27,15 +27,15 @@ class ApiSpec extends Specification with Tags {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
     val env = ClusterEnv(4)
-    val node1 = DistributedMapNode(s"node1-${IdGenerator.uuid}", env)
-    val node2 = DistributedMapNode(s"node2-${IdGenerator.uuid}", env)
-    val node3 = DistributedMapNode(s"node3-${IdGenerator.uuid}", env)
-    val node4 = DistributedMapNode(s"node4-${IdGenerator.uuid}", env)
-    val node5 = DistributedMapNode(s"node5-${IdGenerator.uuid}", env)
-    val node6 = DistributedMapNode(s"node6-${IdGenerator.uuid}", env)
-    val node7 = DistributedMapNode(s"node7-${IdGenerator.uuid}", env)
-    val node8 = DistributedMapNode(s"node8-${IdGenerator.uuid}", env)
-    val node9 = DistributedMapNode(s"node9-${IdGenerator.uuid}", env)
+    val node1 = DistributedMapNode(s"node1-${IdGenerator.token(6)}", env)
+    val node2 = DistributedMapNode(s"node2-${IdGenerator.token(6)}", env)
+    val node3 = DistributedMapNode(s"node3-${IdGenerator.token(6)}", env)
+    val node4 = DistributedMapNode(s"node4-${IdGenerator.token(6)}", env)
+    val node5 = DistributedMapNode(s"node5-${IdGenerator.token(6)}", env)
+    val node6 = DistributedMapNode(s"node6-${IdGenerator.token(6)}", env)
+    val node7 = DistributedMapNode(s"node7-${IdGenerator.token(6)}", env)
+    val node8 = DistributedMapNode(s"node8-${IdGenerator.token(6)}", env)
+    val node9 = DistributedMapNode(s"node9-${IdGenerator.token(6)}", env)
     val client = NodeClient(env)
     var keys = Seq[String]()
 
@@ -50,7 +50,7 @@ class ApiSpec extends Specification with Tags {
       node8.start()
       node9.start()
       client.start()
-      Thread.sleep(3000)   // Wait for cluster setup
+      Thread.sleep(10000)   // Wait for cluster setup
       success
     }
 
