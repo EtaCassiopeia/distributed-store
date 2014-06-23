@@ -61,7 +61,7 @@ class NodeService(node: DistributedMapNode) extends Actor {
   }
 }
 
-class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, config: Configuration, path: File, clientOnly: Boolean = false) extends ClusterAware {
+class DistributedMapNode(name: String, config: Configuration, path: File, env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
 
   private[this] val db = Reference.empty[DB]()
   private[this] val node = Reference.empty[ActorRef]()
@@ -81,9 +81,9 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
   options.createIfMissing(true)
   Logger.configure()
 
-  if (replicates < Env.minimumReplicates) throw new RuntimeException(s"Cannot have less than ${Env.minimumReplicates} replicates")
+  if (env.replicates < Env.minimumReplicates) throw new RuntimeException(s"Cannot have less than ${Env.minimumReplicates} replicates")
 
-  private[server] def replicatesNbr() = replicates
+  private[server] def replicatesNbr() = env.replicates
   private[server] def syncNode(ec: ExecutionContext): Unit = {
     system().scheduler.scheduleOnce(Env.autoResync) {
       Try { blockingRebalance() }
@@ -277,14 +277,9 @@ class DistributedMapNode(name: String, replicates: Int = Env.minimumReplicates, 
 }
 
 object DistributedMapNode {
-  def apply() = new DistributedMapNode(IdGenerator.uuid, Env.minimumReplicates, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid))
-  def apply(replicates: Int) = new DistributedMapNode(IdGenerator.uuid, replicates, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid))
-  def apply(name: String, replicates: Int) = new DistributedMapNode(name, replicates, new Configuration(ConfigFactory.load()), new File(name))
-  def apply(name: String) = new DistributedMapNode(name, Env.minimumReplicates, new Configuration(ConfigFactory.load()), new File(name))
-  def apply(replicates: Int, path: File) = new DistributedMapNode(IdGenerator.uuid, replicates, new Configuration(ConfigFactory.load()), path)
-  def apply(name: String, replicates: Int, path: File) = new DistributedMapNode(name, replicates, new Configuration(ConfigFactory.load()), path)
-  def apply(replicates: Int, config: Configuration, path: File) = new DistributedMapNode(IdGenerator.uuid, replicates, config, path)
-  def apply(replicates: Int, config: Config, path: File) = new DistributedMapNode(IdGenerator.uuid, replicates, new Configuration(config), path)
-  def apply(name: String, replicates: Int, config: Configuration, path: File) = new DistributedMapNode(name, replicates, config, path)
-  def apply(name: String, replicates: Int, config: Config, path: File) = new DistributedMapNode(name, replicates, new Configuration(config), path)
+  def apply(env: ClusterEnv) = new DistributedMapNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env)
+  def apply(name: String, env: ClusterEnv) = new DistributedMapNode(name, new Configuration(ConfigFactory.load()), new File(name), env)
+  def apply(name: String, env: ClusterEnv, path: File) = new DistributedMapNode(name, new Configuration(ConfigFactory.load()), path, env)
+  def apply(name: String, env: ClusterEnv, config: Configuration, path: File) = new DistributedMapNode(name, config, path, env)
+  def apply(name: String, env: ClusterEnv, config: Config, path: File) = new DistributedMapNode(name, new Configuration(config), path, env)
 }

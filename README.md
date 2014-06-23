@@ -20,13 +20,14 @@ implicit val timeout = Duration(1, TimeUnit.SECONDS)
 implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 val nbrOfReplicates = 2
 
-val node1 = DistributedMapNode("node1", nbrOfReplicates).start() 
-val node2 = DistributedMapNode("node2", nbrOfReplicates).start() 
-val node3 = DistributedMapNode("node3", nbrOfReplicates).start() 
-val node4 = DistributedMapNode("node4", nbrOfReplicates).start() 
-val node5 = DistributedMapNode("node5", nbrOfReplicates).start() 
+val env = ClusterEnv(replicates = 2)
+val node1 = DistributedMapNode("node1", env).start() 
+val node2 = DistributedMapNode("node2", env).start() 
+val node3 = DistributedMapNode("node3", env).start() 
+val node4 = DistributedMapNode("node4", env).start() 
+val node5 = DistributedMapNode("node5", env).start() 
 
-val client = NodeClient()
+val client = NodeClient(env)
 
 client.set("key1", Json.obj("hello" -> "world"))  // persisted on n + 1 nodes  
 client.set("key99", Json.obj("goodbye" -> "world")) // persisted on n + 1 nodes  

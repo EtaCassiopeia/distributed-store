@@ -4,7 +4,6 @@ import java.io.File
 
 import com.typesafe.config.ConfigFactory
 import common.{Configuration, IdGenerator}
-import config.Env
 import play.api.libs.json.JsValue
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -32,5 +31,5 @@ class NodeClient(node: DistributedMapNode)  {
 }
 
 object NodeClient {
-  def apply() = new NodeClient(new DistributedMapNode(IdGenerator.uuid, Env.minimumReplicates, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), true))
+  def apply(env: ClusterEnv) = new NodeClient(new DistributedMapNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, true))
 }
