@@ -11,6 +11,11 @@ Each operation is validated by a majority of nodes.
 Persistence is managed by a levelDB for each node. Cluster is managed by akka-cluster.
 
 ```scala
+
+/**
+ * Here every operation on the client is async, so the following example isn't 100% accurate
+ */
+
 implicit val timeout = Duration(1, TimeUnit.SECONDS)
 implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 val nbrOfReplicates = 2
