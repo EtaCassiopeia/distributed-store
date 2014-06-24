@@ -1,3 +1,4 @@
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{Executors, TimeUnit}
 
 import common.IdGenerator
@@ -14,7 +15,7 @@ class Load2Spec extends Specification with Tags {
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-  def performBy(many: Int)(times: Int)(f: => Future[OpStatus]): Unit = {
+  def performBy(title: String)(many: Int)(times: Int)(f: => Future[_]): Unit = {
     val start = System.currentTimeMillis()
     val future = Future.sequence(
       (0 to many).toList.map { _ =>
@@ -26,7 +27,7 @@ class Load2Spec extends Specification with Tags {
       }
     )
     Await.result(future, Duration(10, TimeUnit.MINUTES))
-    println(s"Injection in ${System.currentTimeMillis() - start} ms.")
+    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms.\n\n")
   }
 
   "Distributed Map" should {
@@ -46,16 +47,30 @@ class Load2Spec extends Specification with Tags {
       node4.start()
       node5.start()
       client.start()
-      Thread.sleep(3000)   // Wait for cluster setup
+      Thread.sleep(10000)   // Wait for cluster setup
       success
     }
 
     "Insert some stuff" in {
-      performBy(100)(1000) {
-        val id = IdGenerator.uuid
-        client.set(id, Json.obj(
-          "Hello" -> "World", "key" -> id
+      val id = new AtomicInteger(0)
+      performBy("Injection")(10)(10000) {
+        client.set(id.incrementAndGet().toString, Json.obj(
+          "Hello" -> "World", "key" -> id.get()
         ))
+      }
+      node1.displayStats()
+      node2.displayStats()
+      node3.displayStats()
+      node4.displayStats()
+      node5.displayStats()
+      println("\n\n")
+      success
+    }
+
+    "Read some stuff" in {
+      val id = new AtomicInteger(0)
+      performBy("Read")(100)(1000) {
+        client.get(id.incrementAndGet().toString)
       }
       success
     }

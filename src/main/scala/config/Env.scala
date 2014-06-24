@@ -12,11 +12,12 @@ object Env {
   val clientRole = "DISTRIBUTED-MAP-NODE-CLIENT"
   val mapService = "DISTRIBUTED-MAP-SERVICE"
   val systemName = "distributed-map"
-  val minimumReplicates = 2
-  val workers = 10
+  val syncEvery = 2000                                      // TODO : from file
+  val minimumReplicates = 2                                 // TODO : from file
+  val workers = 10                                          // TODO : from file
   val UTF8 = Charset.forName("UTF-8")
   val autoResync = Duration(5, TimeUnit.MINUTES)            // TODO : from file
-  val waitForCluster = Duration(5, TimeUnit.SECONDS)       // TODO : from file
+  val waitForCluster = Duration(5, TimeUnit.SECONDS)        // TODO : from file
   val rebalanceConflate = Duration(5, TimeUnit.SECONDS)     // TODO : from file
   val rebalanceRetry = 3                                    // TODO : from file
   val waitForRebalanceKey = Duration(10, TimeUnit.SECONDS)  // TODO : from file

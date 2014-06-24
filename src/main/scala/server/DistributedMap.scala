@@ -1,7 +1,8 @@
 package server
 
 import java.io.File
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
+import java.util.concurrent.{TimeUnit, ConcurrentHashMap}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicBoolean, AtomicLong}
 
 import akka.actor._
 import akka.cluster.ClusterEvent._
@@ -16,6 +17,7 @@ import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
 import scala.collection.JavaConversions._
+import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
 
@@ -47,17 +49,14 @@ class NodeService(node: DistributedMapNode) extends Actor {
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case MemberUp(member) => {
       node.updateMembers()
-      //node.displayState()
       node.rebalance()
     }
     case UnreachableMember(member) => {
       node.updateMembers()
-      //node.displayState()
       node.rebalance()
     }
     case MemberRemoved(member, previousStatus) => {
       node.updateMembers()
-      //node.displayState()
       node.rebalance()
     }
     case _ =>
@@ -144,7 +143,11 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
         case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
       }
     }).map { fuStatuses =>
-      val successfulStatuses = fuStatuses.filter(_.successful)
+      val successfulStatuses = fuStatuses.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
+      if (successfulStatuses.size < quorum()) {
+        Logger.error(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
+        OpStatus(false, op.key, None, op.timestamp, op.operationId)
+      }
       successfulStatuses.headOption match {
         case Some(first) => {
           val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
@@ -152,6 +155,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
           if (valid >= quorum()) first
           else {
             Logger.error(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
+            Logger.error(fuStatuses.toString())
             // TODO : rollback operation if no succeed ?
             // TODO : transac mode
             OpStatus(false, first.key, None, first.timestamp, first.operationId)
@@ -213,44 +217,82 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
     }
   }
 
-  private[server] def setOperation(op: SetOperation): OpStatus = {
-    counterWrite.incrementAndGet()
+  private[this] val cache = new ConcurrentHashMap[String, JsValue]()
+  private[this] val cacheSetCount = new AtomicInteger(0)
+  private[this] val synchScheduled = new AtomicBoolean(false)
+  private[this] def setLevelDB(op: SetOperation): OpStatus = {
     Try { db().put(Iq80DBFactory.bytes(op.key), Iq80DBFactory.bytes(Json.stringify(op.value))) } match {
       case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
       case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
     }
   }
+  private[this] def syncCacheIfNecessary(force: Boolean): Unit = {
+    if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
+      Logger.info(s"[$name] Sync cache with LevelDB ...")
+      val batch = db().createWriteBatch()
+      try {
+        cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
+        db().write(batch)
+      } finally {
+        batch.close()
+        cache.clear()
+      }
+      // TODO : not safe if crash ....
+      //if (synchScheduled.compareAndSet(false, true)) {
+      //  Try { system().scheduler.scheduleOnce(Duration(30, TimeUnit.SECONDS)) {
+      //      Try { syncCacheIfNecessary(true) }
+      //      synchScheduled.compareAndSet(true, false)
+      //    }(system().dispatcher)
+      //  }
+      //}
+    } else if (force) {
+      cacheSetCount.set(0)
+      Logger.info(s"[$name] Sync cache with LevelDB ...")
+      val batch = db().createWriteBatch()
+      try {
+        cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
+        db().write(batch)
+      } finally {
+        batch.close()
+        cache.clear()
+      }
+    }
+  }
+
+  private[server] def setOperation(op: SetOperation): OpStatus = {
+    syncCacheIfNecessary(false)
+    counterWrite.incrementAndGet()
+    cache.put(op.key, op.value)
+    cacheSetCount.incrementAndGet()
+    OpStatus(true, op.key, None, op.timestamp, op.operationId)
+  }
 
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
+    syncCacheIfNecessary(false)
     counterDelete.incrementAndGet()
-    Try { db().delete(Iq80DBFactory.bytes(op.key)) } match {
+    Try {
+      cache.remove(op.key)
+      db().delete(Iq80DBFactory.bytes(op.key))
+    } match {
       case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
       case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
     }
   }
 
   private[server] def getOperation(op: GetOperation): OpStatus = {
+    syncCacheIfNecessary(false)
     counterRead.incrementAndGet()
-    val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-    OpStatus(true, op.key, opt, op.timestamp, op.operationId)
-  }
-
-  def displayStats(): DistributedMapNode = {
-    val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
-    val stats = Json.obj(
-      "name" -> name,
-      "readOps" -> counterRead.get(),
-      "writeOps" -> counterWrite.get(),
-      "deleteOps" -> counterDelete.get(),
-      "balanceKeys" -> counterRebalancedKey.get(),
-      "cacheSync" -> counterCacheSync.get(),
-      "keys" -> keys
-    )
-    Logger.info(Json.prettyPrint(stats))
-    this
+    if (cache.containsKey(op.key)) {
+      OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
+    } else {
+      val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
+      OpStatus(true, op.key, opt, op.timestamp, op.operationId)
+    }
   }
 
   // Client API
+  // TODO : coordinates node ???
+
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
@@ -269,6 +311,21 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val targets = targetAndNext(key)
     performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
+  }
+
+  def displayStats(): DistributedMapNode = {
+    val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
+    val stats = Json.obj(
+      "name" -> name,
+      "readOps" -> counterRead.get(),
+      "writeOps" -> counterWrite.get(),
+      "deleteOps" -> counterDelete.get(),
+      "balanceKeys" -> counterRebalancedKey.get(),
+      "cacheSync" -> counterCacheSync.get(),
+      "keys" -> keys
+    )
+    Logger.info(Json.prettyPrint(stats))
+    this
   }
 }
 

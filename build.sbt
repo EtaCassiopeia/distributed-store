@@ -4,6 +4,8 @@ version := "1.0-SNAPSHOT"
 
 scalaVersion := "2.11.1"
 
+javaOptions in test += "-Dsun.net.maxDatagramSockets=1024"
+
 libraryDependencies += "com.typesafe.akka"         %% "akka-actor"               % "2.3.3"
 
 libraryDependencies += "com.typesafe.akka"         %% "akka-actor"               % "2.3.3"   
