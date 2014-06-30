@@ -8,7 +8,7 @@ import play.api.libs.json.JsValue
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class NodeClient(node: DistributedMapNode)  {
+class NodeClient(node: KeyValNode)  {
 
   def start()(implicit ec: ExecutionContext): NodeClient = {
     node.start()(ec)
@@ -31,5 +31,5 @@ class NodeClient(node: DistributedMapNode)  {
 }
 
 object NodeClient {
-  def apply(env: ClusterEnv) = new NodeClient(new DistributedMapNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, true))
+  def apply(env: ClusterEnv) = new NodeClient(new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, true))
 }

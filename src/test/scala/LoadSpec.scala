@@ -3,7 +3,7 @@ import java.util.concurrent.{Executors, TimeUnit}
 import common.IdGenerator
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.{ClusterEnv, DistributedMapNode, NodeClient, OpStatus}
+import server._
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -32,15 +32,15 @@ class LoadSpec extends Specification with Tags {
   "Distributed Map" should {
 
     val env = ClusterEnv(4)
-    val node1 = DistributedMapNode(s"node1-${IdGenerator.token(6)}", env)
-    val node2 = DistributedMapNode(s"node2-${IdGenerator.token(6)}", env)
-    val node3 = DistributedMapNode(s"node3-${IdGenerator.token(6)}", env)
-    val node4 = DistributedMapNode(s"node4-${IdGenerator.token(6)}", env)
-    val node5 = DistributedMapNode(s"node5-${IdGenerator.token(6)}", env)
-    val node6 = DistributedMapNode(s"node6-${IdGenerator.token(6)}", env)
-    val node7 = DistributedMapNode(s"node7-${IdGenerator.token(6)}", env)
-    val node8 = DistributedMapNode(s"node8-${IdGenerator.token(6)}", env)
-    val node9 = DistributedMapNode(s"node9-${IdGenerator.token(6)}", env)
+    val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
+    val node2 = KeyValNode(s"node2-${IdGenerator.token(6)}", env)
+    val node3 = KeyValNode(s"node3-${IdGenerator.token(6)}", env)
+    val node4 = KeyValNode(s"node4-${IdGenerator.token(6)}", env)
+    val node5 = KeyValNode(s"node5-${IdGenerator.token(6)}", env)
+    val node6 = KeyValNode(s"node6-${IdGenerator.token(6)}", env)
+    val node7 = KeyValNode(s"node7-${IdGenerator.token(6)}", env)
+    val node8 = KeyValNode(s"node8-${IdGenerator.token(6)}", env)
+    val node9 = KeyValNode(s"node9-${IdGenerator.token(6)}", env)
     val client = NodeClient(env)
 
     "Start some nodes" in {

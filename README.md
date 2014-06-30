@@ -21,11 +21,11 @@ implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 val nbrOfReplicates = 2
 
 val env = ClusterEnv(replicates = 2)
-val node1 = DistributedMapNode("node1", env).start() 
-val node2 = DistributedMapNode("node2", env).start() 
-val node3 = DistributedMapNode("node3", env).start() 
-val node4 = DistributedMapNode("node4", env).start() 
-val node5 = DistributedMapNode("node5", env).start() 
+val node1 = KeyValNode("node1", env).start()  // nodes can be started on different physical nodes
+val node2 = KeyValNode("node2", env).start() 
+val node3 = KeyValNode("node3", env).start() 
+val node4 = KeyValNode("node4", env).start() 
+val node5 = KeyValNode("node5", env).start() 
 
 val client = NodeClient(env)
 

@@ -2,6 +2,7 @@ package common
 
 import play.api.libs.json.{JsArray, JsNull, JsObject, JsValue}
 
+import scala.collection.generic.CanBuildFrom
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 import scala.util.control.NoStackTrace
@@ -9,6 +10,14 @@ import scala.util.control.NoStackTrace
 package object flatfutures {
 
   object EmptyOption extends RuntimeException("Current option is empty :'(") with NoStackTrace
+
+  implicit final class listOfFuture[A](in: List[Future[A]]) {
+    def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
+  }
+
+  implicit final class sequenceOfFuture[A](in: Seq[Future[A]]) {
+    def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
+  }
 
   implicit final class futureOfOptionToFuture[A](future: Future[Option[A]]) {
     def flatten(implicit ec: ExecutionContext): Future[A] = {

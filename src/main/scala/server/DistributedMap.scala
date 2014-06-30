@@ -1,8 +1,8 @@
 package server
 
 import java.io.File
-import java.util.concurrent.{TimeUnit, ConcurrentHashMap}
-import java.util.concurrent.atomic.{AtomicInteger, AtomicBoolean, AtomicLong}
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
 
 import akka.actor._
 import akka.cluster.ClusterEvent._
@@ -17,11 +17,11 @@ import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
 import scala.collection.JavaConversions._
-import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
+import common.flatfutures.sequenceOfFuture
 
-class NodeServiceWorker(node: DistributedMapNode) extends Actor {
+class NodeServiceWorker(node: KeyValNode) extends Actor {
   override def receive: Receive = {
     case o @ GetOperation(key, t, id) => sender() ! node.getOperation(o)
     case o @ SetOperation(key, value, t, id) => sender() ! node.setOperation(o)
@@ -30,7 +30,7 @@ class NodeServiceWorker(node: DistributedMapNode) extends Actor {
   }
 }
 
-class NodeService(node: DistributedMapNode) extends Actor {
+class NodeService(node: KeyValNode) extends Actor {
   var workers = List[ActorRef]()
   override def preStart(): Unit = {
     Cluster(context.system).subscribe(self, initialStateMode = InitialStateAsEvents,
@@ -63,7 +63,7 @@ class NodeService(node: DistributedMapNode) extends Actor {
   }
 }
 
-class DistributedMapNode(name: String, config: Configuration, path: File, env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
+class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
 
   private[server] val db = Reference.empty[DB]()
   private[server] val node = Reference.empty[ActorRef]()
@@ -94,7 +94,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
     }(ec)
   }
 
-  def start()(implicit ec: ExecutionContext): DistributedMapNode = {
+  def start()(implicit ec: ExecutionContext): KeyValNode = {
     running.set(true)
     bootSystem <== ActorSystem("UDP-Server")
     seeds      <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
@@ -112,10 +112,14 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
     if (!clientOnly) {
       //syncNode()
     }
+    Runtime.getRuntime.addShutdownHook(new Thread(new Runnable() {
+      override def run(): Unit = stop()
+    }))
     this
   }
 
-  def stop(): DistributedMapNode = {
+  def stop(): KeyValNode = {
+    syncCacheIfNecessary(true)
     running.set(false)
     cluster().leave(cluster().selfAddress)
     bootSystem().shutdown()
@@ -133,7 +137,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
 
   private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
-    Future.sequence(targets.map { member =>
+    targets.map { member =>
       Try {
         system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
           case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
@@ -142,8 +146,8 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
         case Success(f) => f
         case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
       }
-    }).map { fuStatuses =>
-      val successfulStatuses = fuStatuses.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
+    }.asFuture.map { fuStatuses =>
+      val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
       if (successfulStatuses.size < quorum()) {
         Logger.error(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
         OpStatus(false, op.key, None, op.timestamp, op.operationId)
@@ -313,7 +317,7 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
     performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
   }
 
-  def displayStats(): DistributedMapNode = {
+  def displayStats(): KeyValNode = {
     val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
     val stats = Json.obj(
       "name" -> name,
@@ -329,10 +333,10 @@ class DistributedMapNode(name: String, config: Configuration, path: File, env: C
   }
 }
 
-object DistributedMapNode {
-  def apply(env: ClusterEnv) = new DistributedMapNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env)
-  def apply(name: String, env: ClusterEnv) = new DistributedMapNode(name, new Configuration(ConfigFactory.load()), new File(name), env)
-  def apply(name: String, env: ClusterEnv, path: File) = new DistributedMapNode(name, new Configuration(ConfigFactory.load()), path, env)
-  def apply(name: String, env: ClusterEnv, config: Configuration, path: File) = new DistributedMapNode(name, config, path, env)
-  def apply(name: String, env: ClusterEnv, config: Config, path: File) = new DistributedMapNode(name, new Configuration(config), path, env)
+object KeyValNode {
+  def apply(env: ClusterEnv) = new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env)
+  def apply(name: String, env: ClusterEnv) = new KeyValNode(name, new Configuration(ConfigFactory.load()), new File(name), env)
+  def apply(name: String, env: ClusterEnv, path: File) = new KeyValNode(name, new Configuration(ConfigFactory.load()), path, env)
+  def apply(name: String, env: ClusterEnv, config: Configuration, path: File) = new KeyValNode(name, config, path, env)
+  def apply(name: String, env: ClusterEnv, config: Config, path: File) = new KeyValNode(name, new Configuration(config), path, env)
 }
