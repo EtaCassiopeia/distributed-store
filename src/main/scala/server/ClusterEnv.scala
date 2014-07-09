@@ -2,7 +2,7 @@ package server
 
 import java.util.concurrent.TimeUnit
 
-import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
+import com.codahale.metrics.{JmxReporter, ConsoleReporter, MetricRegistry}
 import config.Env
 
 case class ClusterEnv(replicates: Int) {
@@ -19,7 +19,9 @@ case class ClusterEnv(replicates: Int) {
   private[this] val quorumFailureRetryMeter = metrics.meter("quorum.failure.with.retry")
   private[this] val quorumFailureMeter = metrics.meter("quorum.failure")
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
+  // TODO : dev only
   private[this] val reporter = ConsoleReporter.forRegistry(metrics).build()
+  private[this] val jmxReporter = JmxReporter.forRegistry(metrics).build()
   // TODO : rebalance timer
   // TODO : cache timer
   def startCommand = commandsTimerOut.time()
@@ -35,10 +37,12 @@ case class ClusterEnv(replicates: Int) {
   def balanceKeys(n: Int) = balanceKeysMeter.mark(n)
 
   def start() = {
+    jmxReporter.start()
     reporter.start(10, TimeUnit.SECONDS)
   }
 
   def stop() = {
+    jmxReporter.stop()
     reporter.stop()
   }
 }
