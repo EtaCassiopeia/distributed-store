@@ -6,6 +6,8 @@ import akka.util.Timeout
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import akka.cluster.{Cluster, Member}
 import java.util.concurrent.atomic.AtomicLong
+import config.Env
+
 import scala.util.Try
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -43,7 +45,6 @@ class ClusterStateClient extends Actor {
 }
 
 object Client {
-  val timeout: Timeout = Timeout(2, TimeUnit.SECONDS)
   private[this] val membersList = new ConcurrentHashMap[String, Member]()
 
   def addMember(member: Member) = {
@@ -66,8 +67,8 @@ object Client {
   val system = Reference.empty[ActorSystem]()
   val cluster = Reference.empty[Cluster]()
 
-  def ref(name: String): Client = new Client(name, system(), timeout, Some(cluster()), Set[String]())
-  def apply() = new ClientBuilder(system(), timeout, Some(cluster()), Set[String]())
+  def ref(name: String): Client = new Client(name, system(), Env.longTimeout, Some(cluster()), Set[String]())
+  def apply() = new ClientBuilder(system(), Env.longTimeout, Some(cluster()), Set[String]())
 }
 
 class ClientBuilder(system: ActorSystem, timeout: Timeout, cluster: Option[Cluster], roles: Set[String]) {
