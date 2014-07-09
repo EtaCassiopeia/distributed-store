@@ -8,7 +8,8 @@ import config.Env
 case class ClusterEnv(replicates: Int) {
 
   private[this] val metrics = new MetricRegistry
-  private[this] val commandsTimer = metrics.timer("operations")
+  private[this] val commandsTimerOut = metrics.timer("operations.out")
+  private[this] val commandsTimerIn = metrics.timer("operations.in")
   private[this] val readsMeter = metrics.meter("operations.reads")
   private[this] val writesMeter = metrics.meter("operations.writes")
   private[this] val deleteMeter = metrics.meter("operations.deletes")
@@ -19,8 +20,10 @@ case class ClusterEnv(replicates: Int) {
   private[this] val quorumFailureMeter = metrics.meter("quorum.failure")
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
   private[this] val reporter = ConsoleReporter.forRegistry(metrics).build()
-
-  def startCommand = commandsTimer.time()
+  // TODO : rebalance timer
+  // TODO : cache timer
+  def startCommand = commandsTimerOut.time()
+  def startCommandIn = commandsTimerIn.time()
   def quorumSuccess = quorumSuccessMeter.mark()
   def quorumFailure = quorumFailureMeter.mark()
   def quorumRetryFailure = quorumFailureRetryMeter.mark()

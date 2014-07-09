@@ -194,7 +194,7 @@ object Futures {
   private[this] def retryPromiseWithPredicate[T](predicate: T => Boolean, times: Int, promise: Promise[T], failure: Option[Throwable], f: => Future[T], ec: ExecutionContext): Unit = {
     (times, failure) match {
       case (0, Some(e)) => promise.tryFailure(e)
-      case (0, None) => promise.tryFailure(new RuntimeException("Failure, but lost track of exception :-("))
+      case (0, None) => promise.tryFailure(new RuntimeException("Predicate did not match"))
       case (i, _) => f.onComplete {
         case Success(t) if predicate(t) => promise.trySuccess(t)
         case Success(t) if !predicate(t) => retryPromiseWithPredicate[T](predicate, times - 1, promise, None, f, ec)

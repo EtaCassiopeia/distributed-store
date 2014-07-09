@@ -272,19 +272,23 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   }
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
+    val ctx = env.startCommandIn
     syncCacheIfNecessary(false)
     env.write
     cache.put(op.key, op.value)
     cacheSetCount.incrementAndGet()
+    ctx.close()
     OpStatus(true, op.key, None, op.timestamp, op.operationId)
   }
 
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
+    val ctx = env.startCommandIn
     syncCacheIfNecessary(false)
     env.delete
     Try {
       cache.remove(op.key)
       db().delete(Iq80DBFactory.bytes(op.key))
+      ctx.close()
     } match {
       case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
       case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
@@ -292,12 +296,14 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   }
 
   private[server] def getOperation(op: GetOperation): OpStatus = {
+    val ctx = env.startCommandIn
     syncCacheIfNecessary(false)
     env.read
     if (cache.containsKey(op.key)) {
       OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
     } else {
       val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
+      ctx.close()
       OpStatus(true, op.key, opt, op.timestamp, op.operationId)
     }
   }
