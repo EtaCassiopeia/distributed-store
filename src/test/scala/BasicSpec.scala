@@ -1,13 +1,12 @@
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util.concurrent.{TimeUnit, Executors}
 
-import common.{IdGenerator, Logger}
+import common.IdGenerator
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.{ClusterEnv, KeyValNode, NodeClient}
+import server.{NodeClient, ClusterEnv, KeyValNode}
 
+import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext}
 
 class BasicSpec extends Specification with Tags {
   sequential
@@ -17,84 +16,139 @@ class BasicSpec extends Specification with Tags {
     implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-    val env = ClusterEnv(4)
+    val env = ClusterEnv(0)
     val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
-    val node2 = KeyValNode(s"node2-${IdGenerator.token(6)}", env)
-    val node3 = KeyValNode(s"node3-${IdGenerator.token(6)}", env)
-    val node4 = KeyValNode(s"node4-${IdGenerator.token(6)}", env)
-    val node5 = KeyValNode(s"node5-${IdGenerator.token(6)}", env)
-    val node6 = KeyValNode(s"node6-${IdGenerator.token(6)}", env)
-    val node7 = KeyValNode(s"node7-${IdGenerator.token(6)}", env)
-    val node8 = KeyValNode(s"node8-${IdGenerator.token(6)}", env)
-    val node9 = KeyValNode(s"node9-${IdGenerator.token(6)}", env)
     val client = NodeClient(env)
-    var keys = Seq[String]()
-    val counterOk = new AtomicLong(0L)
-    val counterKo = new AtomicLong(0L)
 
-    "Start some nodes" in {
+    "Start a node" in {
       node1.start()
-      node2.start()
-      node3.start()
-      node4.start()
-      node5.start()
-      node6.start()
-      node7.start()
-      node8.start()
-      node9.start()
       client.start()
-      Thread.sleep(6000)   // Wait for cluster setup
+      Thread.sleep(2000)   // Wait for cluster setup
       success
     }
 
     "Insert some stuff" in {
-      for (i <- 0 to 1000) {
-        val id = IdGenerator.uuid
-        keys = keys :+ id
-        Await.result( client.set(id, Json.obj(
-          "Hello" -> "World", "key" -> id
-        )), timeout)
-      }
-      success
-    }
 
-    "Shutdown some nodes" in {
-      node2.displayStats().stop().destroy()
-      node4.displayStats().stop().destroy()
-      node6.displayStats().stop().destroy()
-      Thread.sleep(30000)
+      def insert(key: String) = Await.result( client.set(key, Json.obj(
+        "Hello" -> "World", "key" -> key
+      )), timeout)
+
+      insert("12341")
+      insert("12342")
+      insert("12343")
+      insert("12344")
+      insert("12345")
+      insert("12346")
+      insert("12347")
+      insert("12348")
+      insert("12349")
+      insert("12340")
+
       success
     }
 
     "Read some stuff" in {
-      keys.foreach { key =>
+      def shouldFetch(key: String) = {
         val expected = Some(Json.obj("Hello" -> "World", "key" -> key))
-        if (Await.result(client.get(key), timeout) == expected) counterOk.incrementAndGet()
-        else counterKo.incrementAndGet()
-        //shouldEqual Some(Json.obj("Hello" -> "World", "key" -> key))
+        val res = Await.result(client.get(key), timeout)
+        println(Json.prettyPrint(res.get))
+        res shouldEqual expected
       }
+      shouldFetch("12341")
+      shouldFetch("12342")
+      shouldFetch("12343")
+      shouldFetch("12344")
+      shouldFetch("12345")
+      shouldFetch("12346")
+      shouldFetch("12347")
+      shouldFetch("12348")
+      shouldFetch("12349")
+      shouldFetch("12340")
       success
     }
 
     "Delete stuff" in {
-      keys.foreach { key =>
-        Await.result(client.delete(key), timeout)
+      Await.result(client.delete("12341"), timeout)
+      Await.result(client.delete("12342"), timeout)
+      Await.result(client.delete("12343"), timeout)
+      Await.result(client.delete("12344"), timeout)
+      Await.result(client.delete("12345"), timeout)
+      Await.result(client.delete("12346"), timeout)
+      Await.result(client.delete("12347"), timeout)
+      Await.result(client.delete("12348"), timeout)
+      Await.result(client.delete("12349"), timeout)
+      Await.result(client.delete("12340"), timeout)
+      success
+    }
+
+    "Stop the node" in {
+      node1.displayStats().stop().destroy()
+      client.stop()
+      Thread.sleep(2000)
+      success
+    }
+  }
+}
+
+class ConcurrentUsageSpec extends Specification with Tags {
+  sequential
+
+  "Distributed Map" should {
+
+    val nbrClients = 8
+    val nbrNodes = 4
+    val nbrReplicates = 2
+    implicit val timeout = Duration(10, TimeUnit.SECONDS)
+    implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
+    val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))
+
+    val env = ClusterEnv(nbrReplicates)
+    var nodes = List[KeyValNode]()
+    (0 to nbrNodes).foreach { i =>
+      nodes = nodes :+ KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
+    }
+    val client = NodeClient(env)
+
+    "Start nodes" in {
+      nodes.foreach(_.start())
+      client.start()
+      Thread.sleep(10000)   // Wait for cluster setup
+      env.start()
+      success
+    }
+
+    "Let user do some stuff" in {
+
+      def scenario: Unit = {
+        for (i <- 0 to 100) {
+          var seq = Seq[String]()
+          for (j <- 0 to 100) {
+            val id = IdGenerator.uuid
+            seq = seq :+ id
+            Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+          }
+          seq.foreach { id =>
+            Await.result(client.get(id), timeout) should not beNone
+          }
+          seq.foreach { id =>
+            Await.result(client.delete(id), timeout)
+          }
+        }
       }
+      var list = List[Future[Unit]]()
+      for (i <- 0 to nbrClients) {
+        list = list :+ Future(scenario)(userEc)
+      }
+      val fu = Future.sequence(list)
+      Await.result(fu, Duration(600, TimeUnit.SECONDS))
       success
     }
 
     "Stop the nodes" in {
-      node1.displayStats().stop().destroy()
-      node3.displayStats().stop().destroy()
-      node5.displayStats().stop().destroy()
-      node7.displayStats().stop().destroy()
-      node8.displayStats().stop().destroy()
-      node9.displayStats().stop().destroy()
+      nodes.foreach(_.displayStats().stop().destroy())
       client.stop()
-      Thread.sleep(5000)
-      Logger.info(s"Read OK ${counterOk.get()}")
-      Logger.info(s"Read KO ${counterKo.get()}")
-      counterKo.get() shouldEqual 0L
+      Thread.sleep(2000)
+      env.stop()
       success
     }
   }
