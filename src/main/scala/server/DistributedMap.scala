@@ -1,17 +1,17 @@
 package server
 
 import java.io.File
-import java.util.concurrent.{TimeUnit, ConcurrentHashMap}
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
 import akka.actor._
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
 import akka.pattern.ask
-import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
 import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
+import common.flatfutures.sequenceOfFuture
 import config.Env
 import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
@@ -20,7 +20,6 @@ import play.api.libs.json.{JsValue, Json}
 import scala.collection.JavaConversions._
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
-import common.flatfutures.sequenceOfFuture
 
 class NodeServiceWorker(node: KeyValNode) extends Actor {
   override def receive: Receive = {
@@ -48,6 +47,7 @@ class NodeService(node: KeyValNode) extends Actor {
     case o @ GetOperation(key, t, id) => worker(key) forward o
     case o @ SetOperation(key, value, t, id) => worker(key) forward o
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
+    // TODO : handle ask for sync ???
     case MemberUp(member) => {
       node.updateMembers()
       node.rebalance()
@@ -72,11 +72,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[server] val system = Reference.empty[ActorSystem]()
   private[server] val cluster = Reference.empty[Cluster]()
   private[server] val seeds = Reference.empty[SeedConfig]()
-  private[server] val counterRead = new AtomicLong(0L)
-  private[server] val counterWrite = new AtomicLong(0L)
-  private[server] val counterDelete = new AtomicLong(0L)
-  private[server] val counterRebalancedKey = new AtomicLong(0L)
-  private[server] val counterCacheSync = new AtomicLong(0L)
   private[server] val generator = IdGenerator(Random.nextInt(1024))
   private[server] val options = new Options()
   private[server] val running = new AtomicBoolean(false)
@@ -202,7 +197,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
       env.balance
       Try(db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList) match {
         case Success(keys) => {
-          val rebalanced = new AtomicLong(0L)
+          val rebalanced = new AtomicInteger(0)
           val filtered = keys.filter { key =>
             val t = target(key)
             !t.address.toString.contains(cluster().selfAddress.toString)
@@ -213,7 +208,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
               deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
               val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
               futureSet.onComplete {
-                case Success(opStatus) => counterRebalancedKey.incrementAndGet()
+                case Success(opStatus) => //counterRebalancedKey.incrementAndGet()
                 case Failure(e) => {
                   setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
                   rebalance()
@@ -223,7 +218,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
               rebalanced.incrementAndGet()
             }
           }
-          env.balanceKeys(rebalanced.get().toInt)
+          env.balanceKeys(rebalanced.get())
           Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
         }
         case _ => Logger.error("Error while accessing the node persistence unit !!!!")
@@ -278,7 +273,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[server] def setOperation(op: SetOperation): OpStatus = {
     syncCacheIfNecessary(false)
-    counterWrite.incrementAndGet()
     env.write
     cache.put(op.key, op.value)
     cacheSetCount.incrementAndGet()
@@ -287,7 +281,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
     syncCacheIfNecessary(false)
-    counterDelete.incrementAndGet()
     env.delete
     Try {
       cache.remove(op.key)
@@ -300,7 +293,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[server] def getOperation(op: GetOperation): OpStatus = {
     syncCacheIfNecessary(false)
-    counterRead.incrementAndGet()
     env.read
     if (cache.containsKey(op.key)) {
       OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
@@ -347,13 +339,9 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   def displayStats(): KeyValNode = {
     val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
+    // TODO : display metrics here
     val stats = Json.obj(
       "name" -> name,
-      "readOps" -> counterRead.get(),
-      "writeOps" -> counterWrite.get(),
-      "deleteOps" -> counterDelete.get(),
-      "balanceKeys" -> counterRebalancedKey.get(),
-      "cacheSync" -> counterCacheSync.get(),
       "keys" -> keys
     )
     Logger.info(Json.prettyPrint(stats))

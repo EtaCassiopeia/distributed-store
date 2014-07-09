@@ -14,13 +14,13 @@ trait ClusterAware { self: KeyValNode =>
   private[server] def members(): Seq[Member] = membersCache.getOrElse(updateMembers())
 
   private[server] def updateMembers(): Seq[Member] = {
+    // TODO : hashing cache
     val murmur = Hashing.murmur3_128()
     membersCache <== cluster().state.getMembers.toSeq.filter(_.getRoles.contains(Env.nodeRole)).sortWith { (member1, member2) =>
       val hash1 = murmur.hashString(member1.address.toString, Env.UTF8).asLong()
       val hash2 = murmur.hashString(member2.address.toString, Env.UTF8).asLong()
       hash1.compareTo(hash2) < 0
     }
-    counterCacheSync.incrementAndGet()
     membersCache()
   }
 
