@@ -10,7 +10,7 @@ class IdGenerator(generatorId: Long) {
 object IdGenerator {
 
   private[this] val CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".toCharArray.map(_.toString)
-  private[this] val EXTENDED_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789*$£%)([]!=+-_:/;.><&".toCharArray.map(_.toString)
+  private[this] val EXTENDED_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789*$%)([]!=+-_:/;.><&".toCharArray.map(_.toString)
   private[this] val INIT_STRING = for(i <- 0 to 15) yield Integer.toHexString(i)
 
   private[this] val minus = 1288834974657L
