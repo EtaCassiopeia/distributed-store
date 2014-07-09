@@ -1,13 +1,14 @@
 package server
 
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{TimeUnit, ConcurrentHashMap}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
 
 import akka.actor._
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
 import akka.pattern.ask
+import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
 import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
@@ -84,8 +85,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   options.createIfMissing(true)
   Logger.configure()
 
-  if (env.replicates < Env.minimumReplicates) throw new RuntimeException(s"Cannot have less than ${Env.minimumReplicates} replicates")
-
   private[server] def replicatesNbr() = env.replicates
   private[server] def syncNode(ec: ExecutionContext): Unit = {
     system().scheduler.scheduleOnce(Env.autoResync) {
@@ -137,9 +136,9 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
-    targets.map { member =>
+    def actualOperation() = targets.map { member =>
       Try {
-        system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.timeout).mapTo[OpStatus].recover {
+        system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].recover {
           case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
         }
       } match {
@@ -149,7 +148,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     }.asFuture.map { fuStatuses =>
       val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
       if (successfulStatuses.size < quorum()) {
-        Logger.error(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
+        Logger.trace(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
         OpStatus(false, op.key, None, op.timestamp, op.operationId)
       }
       successfulStatuses.headOption match {
@@ -158,8 +157,8 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
           if (valid != fuStatuses.size) rebalance()
           if (valid >= quorum()) first
           else {
-            Logger.error(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
-            Logger.error(fuStatuses.toString())
+            Logger.trace(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
+            Logger.trace(fuStatuses.toString())
             // TODO : rollback operation if no succeed ?
             // TODO : transac mode
             OpStatus(false, first.key, None, first.timestamp, first.operationId)
@@ -171,6 +170,15 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
           OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
         }
       }
+    }.andThen {
+      case Success(OpStatus(false, _, _, _, _)) => env.quorumFailure
+      case Failure(_) => env.quorumFailure
+      case Success(OpStatus(true, _, _, _, _)) =>
+    }
+    Futures.retryWithPredicate[OpStatus](10, _.successful)(actualOperation()).andThen {
+      case Success(OpStatus(false, _, _, _, _)) => env.quorumRetryFailure
+      case Success(OpStatus(true, _, _, _, _)) => env.quorumSuccess
+      case Failure(_) => env.quorumRetryFailure
     }
   }
 
@@ -191,6 +199,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
       val nodes = numberOfNodes()
+      env.balance
       Try(db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList) match {
         case Success(keys) => {
           val rebalanced = new AtomicLong(0L)
@@ -214,6 +223,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
               rebalanced.incrementAndGet()
             }
           }
+          env.balanceKeys(rebalanced.get().toInt)
           Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
         }
         case _ => Logger.error("Error while accessing the node persistence unit !!!!")
@@ -231,13 +241,15 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     }
   }
   private[this] def syncCacheIfNecessary(force: Boolean): Unit = {
-    if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
-      Logger.info(s"[$name] Sync cache with LevelDB ...")
+    if (!clientOnly)
+      if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
+      Logger.trace(s"[$name] Sync cache with LevelDB ...")
       val batch = db().createWriteBatch()
       try {
         cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
         db().write(batch)
       } finally {
+        env.cacheSync
         batch.close()
         cache.clear()
       }
@@ -257,6 +269,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
         cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
         db().write(batch)
       } finally {
+        env.cacheSync
         batch.close()
         cache.clear()
       }
@@ -266,6 +279,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[server] def setOperation(op: SetOperation): OpStatus = {
     syncCacheIfNecessary(false)
     counterWrite.incrementAndGet()
+    env.write
     cache.put(op.key, op.value)
     cacheSetCount.incrementAndGet()
     OpStatus(true, op.key, None, op.timestamp, op.operationId)
@@ -274,6 +288,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
     syncCacheIfNecessary(false)
     counterDelete.incrementAndGet()
+    env.delete
     Try {
       cache.remove(op.key)
       db().delete(Iq80DBFactory.bytes(op.key))
@@ -286,6 +301,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[server] def getOperation(op: GetOperation): OpStatus = {
     syncCacheIfNecessary(false)
     counterRead.incrementAndGet()
+    env.read
     if (cache.containsKey(op.key)) {
       OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
     } else {
@@ -298,23 +314,35 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   // TODO : coordinates node ???
 
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    val fu = performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    fu.onComplete { case _ => ctx.close() }
+    fu
   }
 
   private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    val fu = performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
+    fu.onComplete { case _ => ctx.close() }
+    fu
   }
 
   private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
+    val fu = performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
+    fu.onComplete { case _ => ctx.close() }
+    fu
   }
 
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
+    val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
+    val fu = performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
+    fu.onComplete { case _ => ctx.close() }
+    fu
   }
 
   def displayStats(): KeyValNode = {
