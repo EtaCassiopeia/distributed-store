@@ -191,6 +191,24 @@ object Futures {
     promise.future
   }
 
+  private[this] def retryPromiseWithPredicate[T](predicate: T => Boolean, times: Int, promise: Promise[T], failure: Option[Throwable], f: => Future[T], ec: ExecutionContext): Unit = {
+    (times, failure) match {
+      case (0, Some(e)) => promise.tryFailure(e)
+      case (0, None) => promise.tryFailure(new RuntimeException("Failure, but lost track of exception :-("))
+      case (i, _) => f.onComplete {
+        case Success(t) if predicate(t) => promise.trySuccess(t)
+        case Success(t) if !predicate(t) => retryPromiseWithPredicate[T](predicate, times - 1, promise, None, f, ec)
+        case Failure(e) => retryPromiseWithPredicate[T](predicate, times - 1, promise, Some(e), f, ec)
+      }(ec)
+    }
+  }
+
+  def retryWithPredicate[T](times: Int, predicate: T => Boolean)(f: => Future[T])(implicit ec: ExecutionContext): Future[T] = {
+    val promise = Promise[T]()
+    retryPromiseWithPredicate[T](predicate, times, promise, None, f, ec)
+    promise.future
+  }
+
   def timeout[A](message: => A, duration: scala.concurrent.duration.Duration, scheduler: Scheduler)(implicit ec: ExecutionContext): Future[A] = {
     timeout(message, duration.toMillis, TimeUnit.MILLISECONDS, scheduler)
   }
