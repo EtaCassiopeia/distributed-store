@@ -22,6 +22,7 @@ class BasicSpec extends Specification with Tags {
     val client = NodeClient(env)
 
     "Start a node" in {
+      env.start()
       node1.start("127.0.0.1", 7000)
       client.start(seedNodes = Seq("127.0.0.1:7000"))
       Thread.sleep(2000)   // Wait for cluster setup
@@ -86,6 +87,7 @@ class BasicSpec extends Specification with Tags {
       node1.displayStats().stop().destroy()
       client.stop()
       Thread.sleep(2000)
+      env.stop()
       success
     }
   }

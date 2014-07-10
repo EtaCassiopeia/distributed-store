@@ -28,7 +28,7 @@ object Runner extends App {
   node3.start(seedNodes = Seq("127.0.0.1:7000"))
   client.start(seedNodes = Seq("127.0.0.1:7000"))
 
-  Thread.sleep(20000)
+  Thread.sleep(2000)
 
   def scenario: Unit = {
     for (i <- 0 to 10) {

@@ -14,6 +14,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import common._
 import common.flatfutures.sequenceOfFuture
 import config.Env
+import jmx.JMXMonitor
 import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
@@ -349,12 +350,11 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   def displayStats(): KeyValNode = {
     val keys: Int = Try(db().iterator().toList.size).toOption.getOrElse(-1)
-    // TODO : display metrics here
     val stats = Json.obj(
       "name" -> name,
       "keys" -> keys
     )
-    Logger.info(Json.prettyPrint(stats))
+    Logger.info(Json.prettyPrint(stats ++ Json.obj("probes" -> JMXMonitor.data())))
     this
   }
 }
