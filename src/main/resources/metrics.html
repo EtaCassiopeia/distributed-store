@@ -33,7 +33,8 @@
                         <div class="form-group">
                             <input type="text" id="url" placeholder="http://localhost:9999/metrics.json" value="http://localhost:9999/metrics.json" class="input-large form-control">
                         </div>
-                        <button type="submit" id="monitor" class="btn btn-success">Monitor</button>
+                        <button type="submit" id="monitorHC" class="btn btn-success">Highcharts</button>
+                        <button type="submit" id="monitorSK" class="btn btn-success">Sparkle</button>
                     </form>
                 </div>
             </div>
@@ -49,17 +50,22 @@
                 //var url = 'http://localhost:9999/metrics.json';
                 var updates = [];
 
-                /*Highcharts.setOptions({
+                Highcharts.setOptions({
                     global: {
                         useUTC: false
                     }
                 });
 
-                function createChart(mbean) {
-                    var tmpl = '<div class="row"><div id="widget-' + mbean.name + '" class="col-md-6"></div></div>';
+                function creatHighcharts(mbean, clazz) {
+                    if (clazz === 'col-md-offset-0') {
+                        if ($('.metrics').length > 0) {
+                            $('.container-fluid').append('<div/>');
+                        }
+                        $('.container-fluid').append('<div class="row">');
+                    }
+                    var tmpl = '<div id="widget-' + mbean.name + '" class="metrics col-md-6"></div></div>';
                     $('.container-fluid').append(tmpl);
                     var dataSeries = [];
-
                     _.each(mbean, function(value, index) {
                         var time = (new Date()).getTime();
                         var i = 0;
@@ -79,22 +85,22 @@
                                     {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}, {x: (time + (i++ * 100)), y: 0}]
                             });
                     });
-                    console.log(dataSeries);
                     return $('#widget-' + mbean.name).highcharts({
                         chart: {
                             type: 'spline',
-                            animation: { duration: 5 },
+                            animation: false,
                             marginRight: 10,
                             events: {
-                                load: function(e) {
+                                load: function() {
                                     var series = this.series;
-                                    setInterval(function() {
+                                    function updateHighcharts() {
                                         _.each(series, function(serie) {
                                             var x = (new Date()).getTime();
                                             var y = globalData[mbean.name][serie.name];
                                             serie.addPoint([x, y], true, true);
                                         });
-                                    }, 1000);
+                                    }
+                                    updates.push(updateHighcharts);
                                 }
                             }
                         },
@@ -138,22 +144,19 @@
                         exporting: {
                             enabled: false
                         },
+                        plotOptions: {
+                            spline: {
+                                marker: {
+                                    enabled: false
+                                }
+                            }
+                        },
                         series: dataSeries
                     });
                 }
 
-                function update() {
+                function updateHighcharts(url) {
                     return $.get(url).then(function(data) {
-                        _.each(data, function(item) {
-                            globalData[item.name] = item;
-                        });
-                    }).always(function() {
-                        setTimeout(update, 1000);
-                    });
-                }*/
-
-                function updateSparkle() {
-                    return $.get($('#url').val()).then(function(data) {
                         _.each(data, function(item) {
                             globalData[item.name] = item;
                         });
@@ -161,7 +164,20 @@
                             fn();
                         });
                     }).always(function() {
-                        setTimeout(updateSparkle, 1000);
+                        setTimeout(function() { updateHighcharts(url); }, 1000);
+                    });
+                }
+
+                function updateSparkle(url) {
+                    return $.get(url).then(function(data) {
+                        _.each(data, function(item) {
+                            globalData[item.name] = item;
+                        });
+                        _.each(updates, function(fn) {
+                            fn();
+                        });
+                    }).always(function() {
+                        setTimeout(function() { updateSparkle(url); }, 1000);
                     });
                 }
 
@@ -200,14 +216,30 @@
                                     $('#value-' + name + "-" + index).html(y.toFixed(3));
                                 }
                                 $('#widget-' + name + "-" + index).sparkline(dataSeries, { height: '20px',width: dataSeries.length * 2, tooltipSuffix: ' ' });
-                                //setTimeout(updateSparkle, 1000);
                             }
                             updates.push(updateSparkle);
-                            //updateSparkle();
                         }
                     });
                 }
-                $('#monitor').click(function(e) {
+                $('#monitorHC').click(function(e) {
+                    e.preventDefault();
+                    var url = $('#url').val();
+                    $.get(url, function(data) {
+                        var i = 0;
+                        _.each(data, function(item) {
+                            if (i > 6) {
+                                i = 0;
+                            }
+                            creatHighcharts(item, 'col-md-offset-' + i);
+                            i = i + 6;
+                        });
+                        _.each(data, function(item) {
+                            globalData[item.name] = item;
+                        });
+                        updateHighcharts(url);
+                    })
+                });
+                $('#monitorSK').click(function(e) {
                     e.preventDefault();
                     var url = $('#url').val();
                     $.get(url, function(data) {
@@ -222,7 +254,7 @@
                         _.each(data, function(item) {
                             globalData[item.name] = item;
                         });
-                        updateSparkle();
+                        updateSparkle(url);
                     })
                 });
             });
