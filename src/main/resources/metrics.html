@@ -34,7 +34,7 @@
                             <input type="text" id="url" placeholder="http://localhost:9999/metrics.json" value="http://localhost:9999/metrics.json" class="input-large form-control">
                         </div>
                         <button type="submit" id="monitorHC" class="btn btn-success">Highcharts</button>
-                        <button type="submit" id="monitorSK" class="btn btn-success">Sparkle</button>
+                        <button type="submit" id="monitorSK" class="btn btn-success">Sparklines</button>
                     </form>
                 </div>
             </div>
@@ -113,9 +113,8 @@
                         },
                         tooltip: {
                             formatter: function () {
-                                return '<b>' + this.series.name + '</b><br/>' +
-                                        Highcharts.dateFormat('%Y-%m-%d %H:%M:%S', this.x) + '<br/>' +
-                                        Highcharts.numberFormat(this.y, 2);
+                                return this.series.name + ' <b>' +  Highcharts.numberFormat(this.y, 2) + '</b><br/>' +
+                                        Highcharts.dateFormat('%Y-%m-%d %H:%M:%S', this.x);
                             }
                         },
                         yAxis: [
