@@ -136,44 +136,52 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
-    def actualOperation() = targets.map { member =>
-      Try {
-        system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].recover {
-          case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+    def actualOperation() = {
+      val ctx1 = env.startQuorumAggr
+      targets.map { member =>
+        Try {
+          system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].recover {
+            case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+          }
+        } match {
+          case Success(f) => f
+          case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
         }
-      } match {
-        case Success(f) => f
-        case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
-      }
-    }.asFuture.map { fuStatuses =>
-      val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
-      if (successfulStatuses.size < quorum()) {
-        Logger.trace(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
-        OpStatus(false, op.key, None, op.timestamp, op.operationId)
-      }
-      successfulStatuses.headOption match {
-        case Some(first) => {
-          val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
-          if (valid != fuStatuses.size) rebalance()
-          if (valid >= quorum()) first
-          else {
-            Logger.trace(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
-            Logger.trace(fuStatuses.toString())
-            // TODO : rollback operation if no succeed ?
-            // TODO : transac mode
-            OpStatus(false, first.key, None, first.timestamp, first.operationId)
+      }.asFuture.andThen {
+        case _ => ctx1.close()
+      }.map { fuStatuses =>
+        val ctx2 = env.startQuorum
+        val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
+        if (successfulStatuses.size < quorum()) {
+          Logger.trace(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
+          OpStatus(false, op.key, None, op.timestamp, op.operationId)
+        }
+        val ops = successfulStatuses.headOption match {
+          case Some(first) => {
+            val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
+            if (valid != fuStatuses.size) rebalance()
+            if (valid >= quorum()) first
+            else {
+              Logger.trace(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
+              Logger.trace(fuStatuses.toString())
+              // TODO : rollback operation if no succeed ?
+              // TODO : transac mode
+              OpStatus(false, first.key, None, first.timestamp, first.operationId)
+            }
+          }
+          case None => {
+            // TODO : dafuq !!!
+            Logger.error(s"Operation failed : no response !!!")
+            OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
           }
         }
-        case None => {
-          // TODO : dafuq !!!
-          Logger.error(s"Operation failed : no response !!!")
-          OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
-        }
+        ctx2.close()
+        ops
+      }.andThen {
+        case Success(OpStatus(false, _, _, _, _)) => env.quorumFailure
+        case Failure(_) => env.quorumFailure
+        case Success(OpStatus(true, _, _, _, _)) =>
       }
-    }.andThen {
-      case Success(OpStatus(false, _, _, _, _)) => env.quorumFailure
-      case Failure(_) => env.quorumFailure
-      case Success(OpStatus(true, _, _, _, _)) =>
     }
     Futures.retryWithPredicate[OpStatus](10, _.successful)(actualOperation()).andThen {
       case Success(OpStatus(false, _, _, _, _)) => env.quorumRetryFailure
@@ -196,10 +204,10 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[this] def blockingRebalance(): Unit = {
     if (running.get() && !clientOnly) {
       import scala.collection.JavaConversions._
+      val ctx = env.balance
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
       val nodes = numberOfNodes()
-      env.balance
       Try(db().iterator().map { entry => Iq80DBFactory.asString(entry.getKey)}.toList) match {
         case Success(keys) => {
           val rebalanced = new AtomicInteger(0)
@@ -228,6 +236,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
         }
         case _ => Logger.error("Error while accessing the node persistence unit !!!!")
       }
+      ctx.close()
     }
   }
 
@@ -243,15 +252,16 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[this] def syncCacheIfNecessary(force: Boolean): Unit = {
     if (!clientOnly)
       if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
+      val ctx = env.cacheSync
       Logger.trace(s"[$name] Sync cache with LevelDB ...")
       val batch = db().createWriteBatch()
       try {
         cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
         db().write(batch)
       } finally {
-        env.cacheSync
         batch.close()
         cache.clear()
+        ctx.close()
       }
       // TODO : not safe if crash ....
       //if (synchScheduled.compareAndSet(false, true)) {
@@ -262,6 +272,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
       //  }
       //}
     } else if (force) {
+      val ctx = env.cacheSync
       cacheSetCount.set(0)
       Logger.info(s"[$name] Sync cache with LevelDB ...")
       val batch = db().createWriteBatch()
@@ -269,9 +280,9 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
         cache.entrySet().foreach(e => batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue))))
         db().write(batch)
       } finally {
-        env.cacheSync
         batch.close()
         cache.clear()
+        ctx.close()
       }
     }
   }

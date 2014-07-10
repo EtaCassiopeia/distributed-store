@@ -14,21 +14,24 @@ import play.api.libs.json.Json
 case class ClusterEnv(replicates: Int) {
 
   private[this] val metrics = new MetricRegistry
+  private[this] val commandsTimerClient = metrics.timer("operations.client")
   private[this] val commandsTimerOut = metrics.timer("operations.out")
   private[this] val commandsTimerIn = metrics.timer("operations.in")
   private[this] val readsMeter = metrics.meter("operations.reads")
   private[this] val writesMeter = metrics.meter("operations.writes")
   private[this] val deleteMeter = metrics.meter("operations.deletes")
-  private[this] val cacheSyncMeter = metrics.meter("cache.sync")
-  private[this] val balanceMeter = metrics.meter("balance.sync")
+  private[this] val cacheSyncMeter = metrics.timer("cache.sync")
+  private[this] val balanceMeter = metrics.timer("balance.sync")
   private[this] val balanceKeysMeter = metrics.meter("balance.keys")
   private[this] val quorumFailureRetryMeter = metrics.meter("quorum.failures.with.retry")
   private[this] val quorumFailureMeter = metrics.meter("quorum.failures")
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
-  //private[this] val reporter = ConsoleReporter.forRegistry(metrics).build()
+  private[this] val quorumTimer = metrics.timer("quorum.time")
+  private[this] val quorumAggregateTimer = metrics.timer("quorum.aggregate")
   private[this] val jmxReporter = JmxReporter.forRegistry(metrics).inDomain("distributed-map").build()
-  // TODO : rebalance timer
-  // TODO : cache timer
+  def startQuorum = quorumTimer.time()
+  def startQuorumAggr = quorumAggregateTimer.time()
+  def startCommandclient = commandsTimerClient.time()
   def startCommand = commandsTimerOut.time()
   def startCommandIn = commandsTimerIn.time()
   def quorumSuccess = quorumSuccessMeter.mark()
@@ -37,8 +40,8 @@ case class ClusterEnv(replicates: Int) {
   def read = readsMeter.mark()
   def write = writesMeter.mark()
   def delete = deleteMeter.mark()
-  def cacheSync = cacheSyncMeter.mark()
-  def balance = balanceMeter.mark()
+  def cacheSync = cacheSyncMeter.time()
+  def balance = balanceMeter.time()
   def balanceKeys(n: Int) = balanceKeysMeter.mark(n)
 
   private[this] val server = Reference.empty[HttpServer]()
@@ -60,13 +63,11 @@ case class ClusterEnv(replicates: Int) {
       }
     })
     server().start()
-    //reporter.start(10, TimeUnit.SECONDS)
   }
 
   def stop() = {
     server.foreach(_.stop(0))
     jmxReporter.stop()
-    //reporter.stop()
   }
 }
 

@@ -7,9 +7,15 @@ import server.{NodeClient, ClusterEnv, KeyValNode}
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 
+object Constants {
+  val host = "192.168.1.34"
+  val port = 7000
+  val both = s"$host:$port"
+}
+
 object Host1WithClient extends App {
 
-  val nbrClients = 20
+  val nbrClients = 100
   val nbrNodes = 4
   val nbrReplicates = 2
   implicit val timeout = Duration(10, TimeUnit.SECONDS)
@@ -23,10 +29,10 @@ object Host1WithClient extends App {
   val client = NodeClient(env)
 
   env.start()
-  node1.start("192.168.1.34", 7000)
-  node2.start(seedNodes = Seq("192.168.1.34:7000"))
-  node3.start(seedNodes = Seq("192.168.1.34:7000"))
-  client.start(seedNodes = Seq("192.168.1.34:7000"))
+  node1.start(Constants.host, Constants.port)
+  node2.start(seedNodes = Seq(Constants.both))
+  node3.start(seedNodes = Seq(Constants.both))
+  client.start(seedNodes = Seq(Constants.both))
 
   Thread.sleep(20000)
 
@@ -51,7 +57,7 @@ object Host1WithClient extends App {
     list = list :+ Future(scenario)(userEc)
   }
   val fu = Future.sequence(list)
-  Await.result(fu, Duration(600, TimeUnit.SECONDS))
+  Await.result(fu, Duration(3600, TimeUnit.SECONDS))
 
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = {
@@ -75,9 +81,9 @@ object Host2 extends App {
   val node3 = KeyValNode(s"node3", env)
 
   env.start()
-  node1.start(seedNodes = Seq("192.168.1.34:7000"))
-  node2.start(seedNodes = Seq("192.168.1.34:7000"))
-  node3.start(seedNodes = Seq("192.168.1.34:7000"))
+  node1.start(seedNodes = Seq(Constants.both))
+  node2.start(seedNodes = Seq(Constants.both))
+  node3.start(seedNodes = Seq(Constants.both))
 
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = {
@@ -85,6 +91,25 @@ object Host2 extends App {
       node1.stop().destroy()
       node2.stop().destroy()
       node3.stop().destroy()
+    }
+  })
+}
+
+object SimpleHost extends App {
+
+  implicit val timeout = Duration(10, TimeUnit.SECONDS)
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
+
+  val env = ClusterEnv(0)
+  val node1 = KeyValNode(s"node-${IdGenerator.token(6)}", env)
+
+  env.start()
+  node1.start()
+
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = {
+      env.stop()
+      node1.stop().destroy()
     }
   })
 }
