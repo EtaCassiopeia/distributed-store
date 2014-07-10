@@ -28,6 +28,14 @@
                     </button>
                     <a class="navbar-brand" href="#">Metrics</a>
                 </div>
+                <div class="navbar-collapse collapse">
+                    <form class="navbar-form navbar-right" role="form">
+                        <div class="form-group">
+                            <input type="text" id="url" placeholder="http://localhost:9999/metrics.json" value="http://localhost:9999/metrics.json" class="input-large form-control">
+                        </div>
+                        <button type="submit" id="monitor" class="btn btn-success">Monitor</button>
+                    </form>
+                </div>
             </div>
         </div>
 
@@ -38,7 +46,8 @@
             $(function() {
 
                 var globalData = {};
-                var url = 'http://localhost:9999/metrics.json';
+                //var url = 'http://localhost:9999/metrics.json';
+                var updates = [];
 
                 /*Highcharts.setOptions({
                     global: {
@@ -144,9 +153,12 @@
                 }*/
 
                 function updateSparkle() {
-                    return $.get(url).then(function(data) {
+                    return $.get($('#url').val()).then(function(data) {
                         _.each(data, function(item) {
                             globalData[item.name] = item;
+                        });
+                        _.each(updates, function(fn) {
+                            fn();
                         });
                     }).always(function() {
                         setTimeout(updateSparkle, 1000);
@@ -188,30 +200,31 @@
                                     $('#value-' + name + "-" + index).html(y.toFixed(3));
                                 }
                                 $('#widget-' + name + "-" + index).sparkline(dataSeries, { height: '20px',width: dataSeries.length * 2, tooltipSuffix: ' ' });
-                                setTimeout(updateSparkle, 1000);
+                                //setTimeout(updateSparkle, 1000);
                             }
-                            updateSparkle();
+                            updates.push(updateSparkle);
+                            //updateSparkle();
                         }
                     });
                 }
-
-                $.get(url, function(data) {
-                    var i = 0;
-                    _.each(data, function(item) {
-                        if (i > 8) {
-                            i = 0;
-                        }
-                        //createChart(item);
-                        createSparkle(item, 'col-md-offset-' + i);
-                        i = i + 4;
-                    });
-                    //createChart(data[6]);
-                    _.each(data, function(item) {
-                        globalData[item.name] = item;
-                    });
-                    updateSparkle();
-                    //update();
-                })
+                $('#monitor').click(function(e) {
+                    e.preventDefault();
+                    var url = $('#url').val();
+                    $.get(url, function(data) {
+                        var i = 0;
+                        _.each(data, function(item) {
+                            if (i > 8) {
+                                i = 0;
+                            }
+                            createSparkle(item, 'col-md-offset-' + i);
+                            i = i + 4;
+                        });
+                        _.each(data, function(item) {
+                            globalData[item.name] = item;
+                        });
+                        updateSparkle();
+                    })
+                });
             });
         </script>
     </body>
