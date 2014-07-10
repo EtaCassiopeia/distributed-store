@@ -10,8 +10,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class NodeClient(node: KeyValNode)  {
 
-  def start()(implicit ec: ExecutionContext): NodeClient = {
-    node.start()(ec)
+  def start(seedNodes: Seq[String])(implicit ec: ExecutionContext): NodeClient = {
+    node.start(seedNodes = seedNodes)(ec)
     this
   }
 

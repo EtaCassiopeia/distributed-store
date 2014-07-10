@@ -1,3 +1,4 @@
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{TimeUnit, Executors}
 
 import common.IdGenerator
@@ -21,8 +22,8 @@ class BasicSpec extends Specification with Tags {
     val client = NodeClient(env)
 
     "Start a node" in {
-      node1.start()
-      client.start()
+      node1.start("127.0.0.1", 7000)
+      client.start(seedNodes = Seq("127.0.0.1:7000"))
       Thread.sleep(2000)   // Wait for cluster setup
       success
     }
@@ -110,8 +111,9 @@ class ConcurrentUsageSpec extends Specification with Tags {
     val client = NodeClient(env)
 
     "Start nodes" in {
-      nodes.foreach(_.start())
-      client.start()
+      val port = new AtomicInteger(6999)
+      nodes.foreach(_.start("127.0.0.1", port.incrementAndGet(), Seq("127.0.0.1:7000")))
+      client.start(Seq("127.0.0.1:7000"))
       Thread.sleep(10000)   // Wait for cluster setup
       env.start()
       success

@@ -56,6 +56,16 @@ class SeedConfig(conf: Config, channel: JChannel, address: String, port: Int) {
   }
 }
 
+case class ClusterConfig(config: Config, address: String, port: Int) {
+  def join(cluster: Cluster, seedNodes: Seq[String]) = {
+    val addresses = scala.collection.immutable.Seq().++(seedNodes.:+(s"$address:$port").map { message =>
+      message.split("\\:").toList match {
+        case addr :: prt :: Nil => akka.actor.Address("akka.tcp", Env.systemName, addr, prt.toInt)
+      }
+    }.toSeq)
+    cluster.joinSeedNodes(addresses)
+  }
+}
 
 object SeedHelper {
 
@@ -66,6 +76,22 @@ object SeedHelper {
       serverSocket.close()
       port
     }.toOption.getOrElse(Random.nextInt(1000) + 7000)
+  }
+
+  def manuallyBootstrap(address: String, port: Int, configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): ClusterConfig = {
+    val configBuilder = new StringBuilder()
+    var config = configuration.underlying.getConfig("map-config")
+    val fallback = configuration.underlying.getConfig("map-config")
+    //val address = InetAddress.getLocalHost.getHostAddress
+    //val port = freePort
+    configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
+    configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
+    if (clientOnly) {
+      configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-CLIENT"]\n""")
+    }
+    config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
+    Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
+    new ClusterConfig(config, address, port)
   }
 
   def bootstrapSeed(system: ActorSystem, configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): SeedConfig = {

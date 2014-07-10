@@ -41,12 +41,12 @@ class Load2Spec extends Specification with Tags {
     val client = NodeClient(env)
 
     "Start some nodes" in {
-      node1.start()
-      node2.start()
-      node3.start()
-      node4.start()
-      node5.start()
-      client.start()
+      node1.start("127.0.0.1", 7000)
+      node2.start(seedNodes = Seq("127.0.0.1:7000"))
+      node3.start(seedNodes = Seq("127.0.0.1:7000"))
+      node4.start(seedNodes = Seq("127.0.0.1:7000"))
+      node5.start(seedNodes = Seq("127.0.0.1:7000"))
+      client.start(seedNodes = Seq("127.0.0.1:7000"))
       Thread.sleep(10000)   // Wait for cluster setup
       success
     }

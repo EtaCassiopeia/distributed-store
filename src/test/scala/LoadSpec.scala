@@ -44,16 +44,16 @@ class LoadSpec extends Specification with Tags {
     val client = NodeClient(env)
 
     "Start some nodes" in {
-      node1.start()
-      node2.start()
-      node3.start()
-      node4.start()
-      node5.start()
-      node6.start()
-      node7.start()
-      node8.start()
-      node9.start()
-      client.start()
+      node1.start("127.0.0.1", 7000)
+      node2.start(seedNodes = Seq("127.0.0.1:7000"))
+      node3.start(seedNodes = Seq("127.0.0.1:7000"))
+      node4.start(seedNodes = Seq("127.0.0.1:7000"))
+      node5.start(seedNodes = Seq("127.0.0.1:7000"))
+      node6.start(seedNodes = Seq("127.0.0.1:7000"))
+      node7.start(seedNodes = Seq("127.0.0.1:7000"))
+      node8.start(seedNodes = Seq("127.0.0.1:7000"))
+      node9.start(seedNodes = Seq("127.0.0.1:7000"))
+      client.start(seedNodes = Seq("127.0.0.1:7000"))
       Thread.sleep(6000)   // Wait for cluster setup
       success
     }

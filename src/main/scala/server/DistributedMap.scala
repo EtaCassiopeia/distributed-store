@@ -1,6 +1,7 @@
 package server
 
 import java.io.File
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
@@ -68,10 +69,10 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   private[server] val db = Reference.empty[DB]()
   private[server] val node = Reference.empty[ActorRef]()
-  private[server] val bootSystem = Reference.empty[ActorSystem]()
+  //private[server] val bootSystem = Reference.empty[ActorSystem]()
   private[server] val system = Reference.empty[ActorSystem]()
   private[server] val cluster = Reference.empty[Cluster]()
-  private[server] val seeds = Reference.empty[SeedConfig]()
+  //private[server] val seeds = Reference.empty[SeedConfig]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
   private[server] val options = new Options()
   private[server] val running = new AtomicBoolean(false)
@@ -88,20 +89,25 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     }(ec)
   }
 
-  def start()(implicit ec: ExecutionContext): KeyValNode = {
+  def start(address: String = InetAddress.getLocalHost.getHostAddress, port: Int = SeedHelper.freePort, seedNodes: Seq[String] = Seq())(implicit ec: ExecutionContext): KeyValNode = {
     running.set(true)
-    bootSystem <== ActorSystem("UDP-Server")
-    seeds      <== SeedHelper.bootstrapSeed(bootSystem(), config, clientOnly)
-    system     <== ActorSystem(Env.systemName, seeds().config())
+    //bootSystem <== ActorSystem("UDP-Server")
+    val clusterConfig = SeedHelper.manuallyBootstrap(address, port, config, clientOnly)
+    system     <== ActorSystem(Env.systemName, clusterConfig.config)
     cluster    <== Cluster(system())
     node       <== system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+
     if (!clientOnly) db <== Iq80DBFactory.factory.open(path, options)
-    val wait = seeds().joinCluster(cluster())
-    // TODO : to wait or not to wait
-    Try { Await.result(wait, Env.waitForCluster) } match {
-      case Failure(e) => seeds().forceJoin()
-      case _ =>
-    }
+
+    clusterConfig.join(cluster(), seedNodes)
+
+    //val wait = seeds().joinCluster(cluster())
+    //seeds().
+    //Try { Await.result(wait, Env.waitForCluster) } match {
+    //  case Failure(e) => seeds().forceJoin()
+    //  case _ =>
+    //}
+
     // TODO : run it when needed
     if (!clientOnly) {
       //syncNode()
@@ -116,9 +122,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     syncCacheIfNecessary(true)
     running.set(false)
     cluster().leave(cluster().selfAddress)
-    bootSystem().shutdown()
     system().shutdown()
-    seeds().shutdown()
     // TODO : wait to finish current operations ?
     if (!clientOnly) db().close()
     this

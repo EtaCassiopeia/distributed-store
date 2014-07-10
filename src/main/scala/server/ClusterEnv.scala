@@ -19,9 +19,8 @@ case class ClusterEnv(replicates: Int) {
   private[this] val quorumFailureRetryMeter = metrics.meter("quorum.failure.with.retry")
   private[this] val quorumFailureMeter = metrics.meter("quorum.failure")
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
-  // TODO : dev only
-  private[this] val reporter = ConsoleReporter.forRegistry(metrics).build()
-  private[this] val jmxReporter = JmxReporter.forRegistry(metrics).build()
+  //private[this] val reporter = ConsoleReporter.forRegistry(metrics).build()
+  private[this] val jmxReporter = JmxReporter.forRegistry(metrics).inDomain("distributed-map").build()
   // TODO : rebalance timer
   // TODO : cache timer
   def startCommand = commandsTimerOut.time()
@@ -38,12 +37,12 @@ case class ClusterEnv(replicates: Int) {
 
   def start() = {
     jmxReporter.start()
-    reporter.start(10, TimeUnit.SECONDS)
+    //reporter.start(10, TimeUnit.SECONDS)
   }
 
   def stop() = {
     jmxReporter.stop()
-    reporter.stop()
+    //reporter.stop()
   }
 }
 
