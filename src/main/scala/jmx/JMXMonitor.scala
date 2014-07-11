@@ -3,36 +3,20 @@ package jmx
 import java.lang.management.ManagementFactory
 import javax.management.ObjectName
 
-import play.api.libs.json.{JsArray, Json, JsObject}
+import play.api.libs.json.{JsArray, Json}
 
-import scala.util.{Failure, Success, Try}
+import scala.collection.JavaConversions._
+import scala.util.Try
 
 object JMXMonitor {
 
-  val mbeans = Seq(
-    "distributed-map:name=balance.keys",
-    "distributed-map:name=balance.sync",
-    "distributed-map:name=cache.sync",
-    "distributed-map:name=operations.client",
-    "distributed-map:name=operations.in",
-    "distributed-map:name=operations.out",
-    "distributed-map:name=operations.reads",
-    "distributed-map:name=operations.writes",
-    "distributed-map:name=operations.deletes",
-    "distributed-map:name=quorum.time",
-    "distributed-map:name=quorum.aggregate",
-    "distributed-map:name=quorum.success",
-    "distributed-map:name=quorum.failures",
-    "distributed-map:name=quorum.failures.with.retry"
-  )
+  lazy val mbs = ManagementFactory.getPlatformMBeanServer
 
   def data(): JsArray = {
     var obj = Json.arr()
     Try {
-      val mbs = ManagementFactory.getPlatformMBeanServer
-      for (mbean <- mbeans) {
-        var bean = Json.obj("name" -> mbean.replace("distributed-map:name=", "").replace(".", "-"))
-        val objectname = new ObjectName(mbean)
+      for (objectname <- mbs.queryNames(new ObjectName("distributed-map:name=*"), null).toList.sortWith { (o1, o2) => o1.getCanonicalName.compareTo(o2.getCanonicalName) < 0 }) {
+        var bean = Json.obj("name" -> objectname.getCanonicalName.replace("distributed-map:name=", "").replace(".", "-"))
         mbs.getMBeanInfo(objectname).getAttributes.map { info =>
           mbs.getAttribute(objectname, info.getName) match {
             case a if a.getClass == classOf[String] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[String])
@@ -45,9 +29,6 @@ object JMXMonitor {
         }
         obj = obj :+ bean
       }
-    } match {
-      case Success(_) =>
-      case Failure(e) =>
     }
     obj
   }

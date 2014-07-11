@@ -214,7 +214,7 @@
                                     dataSeries.push(y);
                                     $('#value-' + name + "-" + index).html(y.toFixed(3));
                                 }
-                                $('#widget-' + name + "-" + index).sparkline(dataSeries, { height: '20px',width: dataSeries.length * 2, tooltipSuffix: ' ' });
+                                $('#widget-' + name + "-" + index).sparkline(dataSeries, { height: '20px',width: dataSeries.length * 2, fillColor: '#888888', lineColor: '#000000' });
                             }
                             updates.push(updateSparkle);
                         }

@@ -8,7 +8,7 @@ import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 
 object Constants {
-  val host = "192.168.1.34"
+  val host = "127.0.0.1" //"192.168.1.34"
   val port = 7000
   val both = s"$host:$port"
 }
@@ -62,6 +62,7 @@ object Host1WithClient extends App {
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = {
       env.stop()
+      client.stop()
       node1.stop().destroy()
       node2.stop().destroy()
       node3.stop().destroy()
@@ -112,4 +113,48 @@ object SimpleHost extends App {
       node1.stop().destroy()
     }
   })
+}
+
+object SimpleHostWithClients extends App {
+
+  implicit val timeout = Duration(10, TimeUnit.SECONDS)
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
+  val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(3))
+
+  val env = ClusterEnv(0)
+  val node1 = KeyValNode(s"node-${IdGenerator.token(6)}", env)
+  val client = NodeClient(env)
+
+  env.start()
+  node1.start("127.0.0.1", 7000)
+  client.start(seedNodes = Seq("127.0.0.1:7000"))
+
+  Thread.sleep(5000)
+
+  def scenario: Unit = {
+    for (i <- 0 to 100) {
+      var seq = Seq[String]()
+      for (j <- 0 to 1000) {
+        val id = IdGenerator.uuid
+        seq = seq :+ id
+        Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+      }
+      seq.foreach { id =>
+        Await.result(client.get(id), timeout)
+      }
+      seq.foreach { id =>
+        Await.result(client.delete(id), timeout)
+      }
+    }
+  }
+  //Await.result(Future.sequence(Seq(Future(scenario)(userEc), Future(scenario)(userEc), Future(scenario)(userEc))), Duration(3600, TimeUnit.SECONDS))
+  Await.result(Future.sequence(Seq(Future(scenario)(userEc))), Duration(3600, TimeUnit.SECONDS))
+
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = {
+      env.stop()
+      node1.stop().destroy()
+    }
+  })
+
 }
