@@ -20,6 +20,7 @@ import org.iq80.leveldb.{DB, Options}
 import play.api.libs.json.{JsValue, Json}
 
 import scala.collection.JavaConversions._
+import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Random, Success, Try}
 
@@ -51,12 +52,14 @@ class NodeService(node: KeyValNode) extends Actor {
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case r @ Rollback(status) => {
       val ctx = node.env.rollback
+      node.locks.putIfAbsent(status.key, ())
       // Rollback management : here be dragons
       // Todo : use timestamp to check if rollback
       val opt = node.getOperation(GetOperation(status.key, 0L, 0L)).value
       if (opt.isDefined && status.old.isEmpty) node.deleteOperation(DeleteOperation(status.key, 0L, 0L))
       else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
       else if (opt.isEmpty && status.old.isDefined) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+      node.locks.remove(status.key)
       ctx.close()
     }
     case SyncCacheAndBalance() => {
@@ -90,6 +93,7 @@ class KeyValNode(name: String, config: Configuration, path: File, val env: Clust
   private[server] val running = new AtomicBoolean(false)
   private[server] val run = new AtomicBoolean(false)
   private[server] val runAgain = new AtomicBoolean(false)
+  private[server] val locks = new ConcurrentHashMap[String, Unit]()
 
   options.createIfMissing(true)
   Logger.configure()
@@ -304,48 +308,78 @@ class KeyValNode(name: String, config: Configuration, path: File, val env: Clust
     }
   }
 
-  private[server] def setOperation(op: SetOperation): OpStatus = {
+  private[server] def setOperation(op: SetOperation, rollback: Boolean = false): OpStatus = {
     val ctx = env.startCommandIn
     val ctx2 = env.write
-    syncCacheIfNecessary(false)
-    val old = Option(cache.put(op.key, op.value))
-    cacheSetCount.incrementAndGet()
-    ctx.close()
-    ctx2.close()
-    OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
+    def perform = {
+      syncCacheIfNecessary(false)
+      val old = Option(cache.put(op.key, op.value))
+      cacheSetCount.incrementAndGet()
+      ctx.close()
+      ctx2.close()
+      OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
+    }
+    if (locks.containsKey(op.key)) {
+      env.lock
+      Await.result(Futures.retry(50)(Future {
+        env.lockRetry
+        Thread.sleep(1)
+        perform
+      }(system().dispatcher))(system().dispatcher), Env.longDuration)
+    } else perform
   }
 
-  private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
+  private[server] def deleteOperation(op: DeleteOperation, rollback: Boolean = false): OpStatus = {
     val ctx = env.startCommandIn
     val ctx2 = env.delete
-    syncCacheIfNecessary(false)
-    val old = Try {
-      val opt1 = Option(cache.remove(op.key))
-      val opt2 = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-      if (opt1.isDefined) opt1 else opt2
-    }.toOption.flatten
-    Try {
-      db().delete(Iq80DBFactory.bytes(op.key))
-      ctx.close()
-      ctx2.close()
-    } match {
-      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
-      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId, old)
+    def perform = {
+      syncCacheIfNecessary(false)
+      val old = Try {
+        val opt1 = Option(cache.remove(op.key))
+        val opt2 = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
+        if (opt1.isDefined) opt1 else opt2
+      }.toOption.flatten
+      Try {
+        db().delete(Iq80DBFactory.bytes(op.key))
+        ctx.close()
+        ctx2.close()
+      } match {
+        case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
+        case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId, old)
+      }
     }
+    if (locks.containsKey(op.key)) {
+      env.lock
+      Await.result(Futures.retry(50)(Future {
+        env.lockRetry
+        Thread.sleep(1)
+        perform
+      }(system().dispatcher))(system().dispatcher), Env.longDuration)
+    } else perform
   }
 
-  private[server] def getOperation(op: GetOperation): OpStatus = {
+  private[server] def getOperation(op: GetOperation, rollback: Boolean = false): OpStatus = {
     val ctx = env.startCommandIn
     val ctx2 = env.read
-    syncCacheIfNecessary(false)
-    if (cache.containsKey(op.key)) {
-      OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
-    } else {
-      val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-      ctx.close()
-      ctx2.close()
-      OpStatus(true, op.key, opt, op.timestamp, op.operationId)
+    def perform = {
+      syncCacheIfNecessary(false)
+      if (cache.containsKey(op.key)) {
+        OpStatus(true, op.key, Option(cache.get(op.key)), op.timestamp, op.operationId)
+      } else {
+        val opt = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
+        ctx.close()
+        ctx2.close()
+        OpStatus(true, op.key, opt, op.timestamp, op.operationId)
+      }
     }
+    if (locks.containsKey(op.key)) {
+      env.lock
+      Await.result(Futures.retry(50)(Future {
+        env.lockRetry
+        Thread.sleep(1)
+        perform
+      }(system().dispatcher))(system().dispatcher), Env.longDuration)
+    } else perform
   }
 
   // Client API

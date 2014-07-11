@@ -21,4 +21,5 @@ object Env {
   val waitForRebalanceKey = Duration(10, TimeUnit.SECONDS)  // TODO : from file
   val rebalanceRetry = 3                                    // TODO : from file
   val longTimeout = Timeout(1, TimeUnit.MINUTES)            // TODO : from file
+  val longDuration = Duration(1, TimeUnit.MINUTES)            // TODO : from file
 }
