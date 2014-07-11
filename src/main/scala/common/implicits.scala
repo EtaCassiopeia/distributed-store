@@ -15,7 +15,15 @@ package object flatfutures {
     def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
   }
 
+  implicit final class listOfFutureTuple[A, B](in: List[Future[(A, B)]]) {
+    def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
+  }
+
   implicit final class sequenceOfFuture[A](in: Seq[Future[A]]) {
+    def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
+  }
+
+  implicit final class sequenceOfFutureTuple[A, B](in: Seq[Future[(A, B)]]) {
     def asFuture(implicit ec: ExecutionContext) = Future.sequence(in)
   }
 

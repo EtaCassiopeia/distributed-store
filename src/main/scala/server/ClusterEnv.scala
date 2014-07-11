@@ -2,11 +2,13 @@ package server
 
 import java.net.InetSocketAddress
 import java.nio.charset.Charset
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util.concurrent.{Future, Executors, TimeUnit}
 
 import com.codahale.metrics.{JmxReporter, ConsoleReporter, MetricRegistry}
+import com.librato.metrics.HttpPoster.Response
+import com.librato.metrics.{NingHttpPoster, HttpPoster, LibratoReporter}
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
-import common.Reference
+import common.{IdGenerator, Reference}
 import config.Env
 import jmx.JMXMonitor
 import play.api.libs.json.Json
@@ -17,6 +19,7 @@ case class ClusterEnv(replicates: Int) {
   private[this] val commandsTimerClient = metrics.timer("operations.client")
   private[this] val commandsTimerOut = metrics.timer("operations.out")
   private[this] val commandsTimerIn = metrics.timer("operations.in")
+  private[this] val rollbackMeter = metrics.timer("operations.rollback")
   private[this] val readsMeter = metrics.timer("operations.reads")
   private[this] val writesMeter = metrics.timer("operations.writes")
   private[this] val deleteMeter = metrics.timer("operations.deletes")
@@ -28,7 +31,9 @@ case class ClusterEnv(replicates: Int) {
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
   private[this] val quorumTimer = metrics.timer("quorum.time")
   private[this] val quorumAggregateTimer = metrics.timer("quorum.aggregate")
+
   private[this] val jmxReporter = JmxReporter.forRegistry(metrics).inDomain("distributed-map").build()
+
   def startQuorum = quorumTimer.time()
   def startQuorumAggr = quorumAggregateTimer.time()
   def startCommandclient = commandsTimerClient.time()
@@ -37,6 +42,7 @@ case class ClusterEnv(replicates: Int) {
   def quorumSuccess = quorumSuccessMeter.mark()
   def quorumFailure = quorumFailureMeter.mark()
   def quorumRetryFailure = quorumFailureRetryMeter.mark()
+  def rollback = rollbackMeter.time()
   def read = readsMeter.time()
   def write = writesMeter.time()
   def delete = deleteMeter.time()
@@ -48,6 +54,12 @@ case class ClusterEnv(replicates: Int) {
 
   def start() = {
     jmxReporter.start()
+
+    // val username = "mathieu.ancelin@gmail.com"
+    // val token = IdGenerator.token
+    // LibratoReporter.builder(metrics, username, token, "distributed-map")
+    //   .setHttpPoster(NingHttpPoster.newPoster(username, token, "http://localhost:9000"))
+    //   .build().start(10, TimeUnit.SECONDS)
 
     server <== HttpServer.create(new InetSocketAddress("0.0.0.0", 9999), 0)
     server().setExecutor(Executors.newFixedThreadPool(1))

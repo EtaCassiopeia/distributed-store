@@ -12,7 +12,7 @@ import akka.pattern.ask
 import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
-import common.flatfutures.sequenceOfFuture
+import common.flatfutures._
 import config.Env
 import jmx.JMXMonitor
 import org.iq80.leveldb.impl.Iq80DBFactory
@@ -49,7 +49,20 @@ class NodeService(node: KeyValNode) extends Actor {
     case o @ GetOperation(key, t, id) => worker(key) forward o
     case o @ SetOperation(key, value, t, id) => worker(key) forward o
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
-    // TODO : handle ask for sync ???
+    case r @ Rollback(status) => {
+      val ctx = node.env.rollback
+      // Rollback management : here be dragons
+      // Todo : use timestamp to check if rollback
+      val opt = node.getOperation(GetOperation(status.key, 0L, 0L)).value
+      if (opt.isDefined && status.old.isEmpty) node.deleteOperation(DeleteOperation(status.key, 0L, 0L))
+      else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+      else if (opt.isEmpty && status.old.isDefined) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+      ctx.close()
+    }
+    case SyncCacheAndBalance() => {
+      node.syncCacheIfNecessary(true)
+      node.rebalance()
+    }
     case MemberUp(member) => {
       node.updateMembers()
       node.rebalance()
@@ -66,18 +79,17 @@ class NodeService(node: KeyValNode) extends Actor {
   }
 }
 
-class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
+class KeyValNode(name: String, config: Configuration, path: File, val env: ClusterEnv, clientOnly: Boolean = false) extends ClusterAware {
 
   private[server] val db = Reference.empty[DB]()
   private[server] val node = Reference.empty[ActorRef]()
-  //private[server] val bootSystem = Reference.empty[ActorSystem]()
   private[server] val system = Reference.empty[ActorSystem]()
   private[server] val cluster = Reference.empty[Cluster]()
-  //private[server] val seeds = Reference.empty[SeedConfig]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
   private[server] val options = new Options()
   private[server] val running = new AtomicBoolean(false)
   private[server] val run = new AtomicBoolean(false)
+  private[server] val runAgain = new AtomicBoolean(false)
 
   options.createIfMissing(true)
   Logger.configure()
@@ -92,7 +104,7 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
   def start(address: String = InetAddress.getLocalHost.getHostAddress, port: Int = SeedHelper.freePort, seedNodes: Seq[String] = Seq())(implicit ec: ExecutionContext): KeyValNode = {
     running.set(true)
-    //bootSystem <== ActorSystem("UDP-Server")
+
     val clusterConfig = SeedHelper.manuallyBootstrap(address, port, config, clientOnly)
     system     <== ActorSystem(Env.systemName, clusterConfig.config)
     cluster    <== Cluster(system())
@@ -102,19 +114,15 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
 
     clusterConfig.join(cluster(), seedNodes)
 
-    //val wait = seeds().joinCluster(cluster())
-    //seeds().
-    //Try { Await.result(wait, Env.waitForCluster) } match {
-    //  case Failure(e) => seeds().forceJoin()
-    //  case _ =>
-    //}
-
-    // TODO : run it when needed
     if (!clientOnly) {
-      //syncNode()
+      syncNode(system().dispatcher)
     }
+
     Runtime.getRuntime.addShutdownHook(new Thread(new Runnable() {
-      override def run(): Unit = stop()
+      override def run(): Unit = {
+        syncCacheIfNecessary(true)
+        stop()
+      }
     }))
     this
   }
@@ -124,80 +132,95 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     running.set(false)
     cluster().leave(cluster().selfAddress)
     system().shutdown()
-    // TODO : wait to finish current operations ?
     if (!clientOnly) db().close()
     this
   }
 
   def destroy(): Unit = {
-    // TODO : wait to finish current operations ?
     Iq80DBFactory.factory.destroy(path, options)
   }
 
+  case class LocalizedStatus(ops: OpStatus, member: Member)
+
   private[this] def performOperationWithQuorum(op: Operation, targets: Seq[Member]): Future[OpStatus] = {
     implicit val ec = system().dispatcher
-    def actualOperation() = {
+    def actualOperation(): Future[OpStatus] = {
       val ctx1 = env.startQuorumAggr
       targets.map { member =>
         Try {
-          system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].recover {
-            case _ => OpStatus(false, "", None, System.currentTimeMillis(), 0L)
+          system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+            case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
         } match {
           case Success(f) => f
-          case Failure(e) => Future.successful(OpStatus(false, "", None, System.currentTimeMillis(), 0L))
+          case Failure(e) => Future.successful(LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member))
         }
       }.asFuture.andThen {
         case _ => ctx1.close()
-      }.map { fuStatuses =>
+      }.map { lll =>
+        val fuStatuses = lll.map(_.ops)
         val ctx2 = env.startQuorum
         val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
         if (successfulStatuses.size < quorum()) {
           Logger.trace(s"Operation failed : quorum was ${successfulStatuses.size} success / ${quorum()} mandatory")
+          ctx2.close()
           OpStatus(false, op.key, None, op.timestamp, op.operationId)
-        }
-        val ops = successfulStatuses.headOption match {
-          case Some(first) => {
-            val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
-            if (valid != fuStatuses.size) rebalance()
-            if (valid >= quorum()) first
-            else {
-              Logger.trace(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
-              Logger.trace(fuStatuses.toString())
-              // TODO : rollback operation if no succeed ?
-              // TODO : transac mode
-              OpStatus(false, first.key, None, first.timestamp, first.operationId)
+        } else {
+          val ops: OpStatus = successfulStatuses.headOption match {
+            case Some(first) => {
+              // check if all responses equals first one
+              val valid = successfulStatuses.filter(_.value == first.value).map(_ => 1).fold(0)(_ + _) // TODO : handle version timestamp conflicts
+              // if less valid than returns try to rebalance data
+              if (valid != fuStatuses.size) rebalance()
+              // if better than quorum then return first OpStatus
+              if (valid >= quorum()) first
+              else {
+                Logger.trace(s"Operation failed : quorum was $valid success / ${quorum()} mandatory")
+                Logger.trace(fuStatuses.toString())
+                // Transaction rollback here, tell every nodes to rollback to it's previous state
+                val fail = OpStatus(false, first.key, None, first.timestamp, first.operationId)
+                op match {
+                  case DeleteOperation(_, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.mapService) ! Rollback(status.ops))
+                  case SetOperation(_, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.mapService) ! Rollback(status.ops))
+                  case _ =>
+                }
+                fail
+              }
+            }
+            case None => {
+              Logger.error(s"Operation failed : no response !!!")
+              OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
             }
           }
-          case None => {
-            // TODO : dafuq !!!
-            Logger.error(s"Operation failed : no response !!!")
-            OpStatus(false, "None", None, System.currentTimeMillis(), 0L)
-          }
+          ctx2.close()
+          ops
         }
-        ctx2.close()
-        ops
       }.andThen {
-        case Success(OpStatus(false, _, _, _, _)) => env.quorumFailure
+        case Success(OpStatus(false, _, _, _, _, _)) => env.quorumFailure
         case Failure(_) => env.quorumFailure
-        case Success(OpStatus(true, _, _, _, _)) =>
+        case Success(OpStatus(true, _, _, _, _, _)) =>
       }
     }
     Futures.retryWithPredicate[OpStatus](10, _.successful)(actualOperation()).andThen {
-      case Success(OpStatus(false, _, _, _, _)) => env.quorumRetryFailure
-      case Success(OpStatus(true, _, _, _, _)) => env.quorumSuccess
+      case Success(OpStatus(false, _, _, _, _, _)) => env.quorumRetryFailure
+      case Success(OpStatus(true, _, _, _, _, _)) => env.quorumSuccess
       case Failure(_) => env.quorumRetryFailure
     }
   }
 
   private[server] def rebalance(): Unit = {
-    // TODO : enqueue calls ?
     implicit val ec = system().dispatcher
     if (run.compareAndSet(false, true)) {
       system().scheduler.scheduleOnce(Env.rebalanceConflate) {
         blockingRebalance()
         run.compareAndSet(true, false)
+        if (runAgain.get()) {
+          runAgain.compareAndSet(true, false)
+          rebalance()
+        }
       }
+    } else {
+      runAgain.compareAndSet(false, true)
     }
   }
 
@@ -243,13 +266,15 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   private[this] val cache = new ConcurrentHashMap[String, JsValue]()
   private[this] val cacheSetCount = new AtomicInteger(0)
   private[this] val synchScheduled = new AtomicBoolean(false)
+
   private[this] def setLevelDB(op: SetOperation): OpStatus = {
     Try { db().put(Iq80DBFactory.bytes(op.key), Iq80DBFactory.bytes(Json.stringify(op.value))) } match {
       case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
       case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
     }
   }
-  private[this] def syncCacheIfNecessary(force: Boolean): Unit = {
+
+  private[server] def syncCacheIfNecessary(force: Boolean): Unit = {
     if (!clientOnly)
       if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
       val ctx = env.cacheSync
@@ -263,14 +288,6 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
         cache.clear()
         ctx.close()
       }
-      // TODO : not safe if crash ....
-      //if (synchScheduled.compareAndSet(false, true)) {
-      //  Try { system().scheduler.scheduleOnce(Duration(30, TimeUnit.SECONDS)) {
-      //      Try { syncCacheIfNecessary(true) }
-      //      synchScheduled.compareAndSet(true, false)
-      //    }(system().dispatcher)
-      //  }
-      //}
     } else if (force) {
       val ctx = env.cacheSync
       cacheSetCount.set(0)
@@ -291,25 +308,29 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
     val ctx = env.startCommandIn
     val ctx2 = env.write
     syncCacheIfNecessary(false)
-    cache.put(op.key, op.value)
+    val old = Option(cache.put(op.key, op.value))
     cacheSetCount.incrementAndGet()
     ctx.close()
     ctx2.close()
-    OpStatus(true, op.key, None, op.timestamp, op.operationId)
+    OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
   }
 
   private[server] def deleteOperation(op: DeleteOperation): OpStatus = {
     val ctx = env.startCommandIn
     val ctx2 = env.delete
     syncCacheIfNecessary(false)
+    val old = Try {
+      val opt1 = Option(cache.remove(op.key))
+      val opt2 = Option(Iq80DBFactory.asString(db().get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
+      if (opt1.isDefined) opt1 else opt2
+    }.toOption.flatten
     Try {
-      cache.remove(op.key)
       db().delete(Iq80DBFactory.bytes(op.key))
       ctx.close()
       ctx2.close()
     } match {
-      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
-      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
+      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
+      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId, old)
     }
   }
 
@@ -328,38 +349,28 @@ class KeyValNode(name: String, config: Configuration, path: File, env: ClusterEn
   }
 
   // Client API
-  // TODO : coordinates node ???
-
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    val fu = performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
-    fu.onComplete { case _ => ctx.close() }
-    fu
+    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
   }
 
   private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    val fu = performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets)
-    fu.onComplete { case _ => ctx.close() }
-    fu
+    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
   }
 
   private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    val fu = performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets)
-    fu.onComplete { case _ => ctx.close() }
-    fu
+    performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
   }
 
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    val fu = performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value)
-    fu.onComplete { case _ => ctx.close() }
-    fu
+    performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value).andThen { case _ => ctx.close() }
   }
 
   def displayStats(): KeyValNode = {

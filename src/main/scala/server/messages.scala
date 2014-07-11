@@ -11,4 +11,6 @@ case class Coordinates(operation: Operation)
 case class SetOperation(key: String, value: JsValue, timestamp: Long, operationId: Long) extends Operation
 case class GetOperation(key: String, timestamp: Long, operationId: Long) extends Operation
 case class DeleteOperation(key: String, timestamp: Long, operationId: Long) extends Operation
-case class OpStatus(successful: Boolean, key: String, value: Option[JsValue], timestamp: Long, operationId: Long)
+case class OpStatus(successful: Boolean, key: String, value: Option[JsValue], timestamp: Long, operationId: Long, old: Option[JsValue] = None)
+case class SyncCacheAndBalance()
+case class Rollback(status: OpStatus)

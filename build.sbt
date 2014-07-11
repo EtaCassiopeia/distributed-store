@@ -26,6 +26,8 @@ libraryDependencies += "com.codahale.metrics"      % "metrics-core"             
 
 libraryDependencies += "org.jgroups"               % "jgroups"                   % "3.4.4.Final"
 
+libraryDependencies += "com.librato.metrics"       % "metrics-librato"           % "4.0.1.1"
+
 libraryDependencies += "org.specs2"                %% "specs2"                   % "2.3.12"            % "test"
 
 
