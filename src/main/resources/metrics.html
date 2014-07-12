@@ -222,6 +222,7 @@
                 }
                 $('#monitorHC').click(function(e) {
                     e.preventDefault();
+                    $('.container-fluid').html('');
                     var url = $('#url').val();
                     $.get(url, function(data) {
                         var i = 0;
@@ -240,6 +241,7 @@
                 });
                 $('#monitorSK').click(function(e) {
                     e.preventDefault();
+                    $('.container-fluid').html('');
                     var url = $('#url').val();
                     $.get(url, function(data) {
                         var i = 0;
