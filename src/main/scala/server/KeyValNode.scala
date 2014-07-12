@@ -217,7 +217,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     performOperationWithQuorum(SetOperation(key, value, time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => OpStatus(false, key, None, time, id)
+      case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
@@ -229,7 +229,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     performOperationWithQuorum(SetOperation(key, value, time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => OpStatus(false, key, None, time, id)
+      case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
@@ -241,7 +241,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     performOperationWithQuorum(DeleteOperation(key, time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => OpStatus(false, key, None, time, id)
+      case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
@@ -253,7 +253,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => None
+      case _ => None     // TODO : only for managed errors
     }
   }
 
@@ -265,7 +265,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     performOperationWithQuorum(GetOperation(key, time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => OpStatus(false, key, None, time, id)
+      case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
