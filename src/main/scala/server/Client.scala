@@ -48,6 +48,13 @@ class NodeClient(env: ClusterEnv, node: KeyValNode)  {
     }(ec)
   }
 
+  def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommandclient
+    node.getOp(key)(ec).andThen {
+      case _ => ctx.close()
+    }(ec)
+  }
+
 }
 
 object NodeClient {

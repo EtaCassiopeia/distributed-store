@@ -2,14 +2,37 @@ package server
 
 import java.util.concurrent.ConcurrentHashMap
 
-import akka.actor.Address
-import akka.cluster.Member
+import akka.actor.{Actor, Address}
+import akka.cluster.ClusterEvent._
+import akka.cluster.{Cluster, Member}
 import com.google.common.hash.{HashCode, Hashing}
 import common.{Reference, Logger}
 import config.Env
 import collection.JavaConversions._
 
-trait ClusterAware { self: KeyValNode =>
+class NodeClusterWatcher(node: KeyValNode) extends Actor {
+  override def preStart(): Unit = {
+    Cluster(context.system).subscribe(self, initialStateMode = InitialStateAsEvents,
+      classOf[MemberEvent], classOf[UnreachableMember])
+  }
+  override def receive: Receive = {
+    case MemberUp(member) => {
+      node.updateMembers()
+      node.rebalance()
+    }
+    case UnreachableMember(member) => {
+      node.updateMembers()
+      node.rebalance()
+    }
+    case MemberRemoved(member, previousStatus) => {
+      node.updateMembers()
+      node.rebalance()
+    }
+    case _ =>
+  }
+}
+
+trait ClusterSupport { self: KeyValNode =>
 
   private[server] val membersCache = Reference.empty[Seq[Member]]()
 

@@ -59,7 +59,7 @@ case class ClusterEnv(replicates: Int) {
   def start() = {
     jmxReporter.start()
 
-    // val username = "mathieu.ancelin@gmail.com"
+    // val username = "foo.bar@gmail.com"
     // val token = IdGenerator.token
     // LibratoReporter.builder(metrics, username, token, "distributed-map")
     //   .setHttpPoster(NingHttpPoster.newPoster(username, token, "http://localhost:9000"))

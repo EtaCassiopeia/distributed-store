@@ -11,9 +11,10 @@ object Env {
   val nodeRole = "DISTRIBUTED-MAP-NODE"
   val clientRole = "DISTRIBUTED-MAP-NODE-CLIENT"
   val mapService = "DISTRIBUTED-MAP-SERVICE"
+  val mapWatcher = "DISTRIBUTED-MAP-CLUSTER-WATCHER"
   val systemName = "distributed-map"
-  val syncEvery = 2000                                      // TODO : from file
-  val workers = 20                                          // TODO : from file
+  val syncEvery = 10                                        // TODO : from file
+  val workers = 50                                          // TODO : from file
   val UTF8 = Charset.forName("UTF-8")
   val autoResync = Duration(5, TimeUnit.MINUTES)            // TODO : from file
   val waitForCluster = Duration(5, TimeUnit.SECONDS)        // TODO : from file
