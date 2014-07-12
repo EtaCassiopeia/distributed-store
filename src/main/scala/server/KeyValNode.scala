@@ -212,31 +212,61 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
+    val time = System.currentTimeMillis()
+    val id = generator.nextId()
+    performOperationWithQuorum(SetOperation(key, value, time, id), targets)
+      .andThen { case _ => ctx.close() }
+      .recover {
+      case _ => OpStatus(false, key, None, time, id)
+    }
   }
 
   private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(SetOperation(key, value, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
+    val time = System.currentTimeMillis()
+    val id = generator.nextId()
+    performOperationWithQuorum(SetOperation(key, value, time, id), targets)
+      .andThen { case _ => ctx.close() }
+      .recover {
+      case _ => OpStatus(false, key, None, time, id)
+    }
   }
 
   private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
+    val time = System.currentTimeMillis()
+    val id = generator.nextId()
+    performOperationWithQuorum(DeleteOperation(key, time, id), targets)
+      .andThen { case _ => ctx.close() }
+      .recover {
+      case _ => OpStatus(false, key, None, time, id)
+    }
   }
 
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).map(_.value).andThen { case _ => ctx.close() }
+    val time = System.currentTimeMillis()
+    val id = generator.nextId()
+    performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value)
+      .andThen { case _ => ctx.close() }
+      .recover {
+      case _ => None
+    }
   }
 
   private[server] def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
     val targets = targetAndNext(key)
-    performOperationWithQuorum(GetOperation(key, System.currentTimeMillis(), generator.nextId()), targets).andThen { case _ => ctx.close() }
+    val time = System.currentTimeMillis()
+    val id = generator.nextId()
+    performOperationWithQuorum(GetOperation(key, time, id), targets)
+      .andThen { case _ => ctx.close() }
+      .recover {
+      case _ => OpStatus(false, key, None, time, id)
+    }
   }
 
   def displayStats(): KeyValNode = {
