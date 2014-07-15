@@ -77,24 +77,22 @@ trait ClusterSupport { self: KeyValNode =>
   private[server] def numberOfNodes(): Int = listOfNodes().size
 
   // For testing purpose
-  private[server] def targets(key: String): Seq[Address] = targetAndNext(key).map(_.address)
+  private[server] def targets(key: String, quorum: Int): Seq[Address] = targetAndNext(key, quorum).map(_.address)
 
   private[server] def target(key: String): Member = {
     val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
     listOfNodes()(id % (if (numberOfNodes() > 0) numberOfNodes() else 1))
   }
 
-  private[server] def targetAndNext(key: String): Seq[Member] = {
+  private[server] def targetAndNext(key: String, quorum: Int): Seq[Member] = {
     val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), numberOfNodes())
     var targets = Seq[Member]()
-    for (i <- 0 to self.replicatesNbr()) {
+    for (i <- 0 to quorum - 1) {
       val next = (id + i) % (if (numberOfNodes() > 0) numberOfNodes() else 1)
       targets = targets :+ listOfNodes()(next)
     }
     targets
   }
-
-  private[server] def quorum(): Int = ((self.replicatesNbr() + 1) / 2) + 1
 
   private[server] def displayState() = {
     Logger("CLIENTS_WATCHER").debug(s"----------------------------------------------------------------------------")

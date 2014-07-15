@@ -27,8 +27,6 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   Logger.configure()
 
-  private[server] def replicatesNbr() = env.replicates
-
   private[server] def lock(key: String) = db.lock(key)
 
   private[server] def unlock(key: String) = db.unlock(key)
@@ -82,7 +80,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   // Client API
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
-    val targets = targetAndNext(key)
+    val targets = targetAndNext(key, env.quorumWrite)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
     performOperationWithQuorum(SetOperation(key, value, time, id), targets)
@@ -94,7 +92,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
-    val targets = targetAndNext(key)
+    val targets = targetAndNext(key, env.quorumWrite)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
     performOperationWithQuorum(SetOperation(key, value, time, id), targets)
@@ -106,7 +104,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
-    val targets = targetAndNext(key)
+    val targets = targetAndNext(key, env.quorumWrite)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
     performOperationWithQuorum(DeleteOperation(key, time, id), targets)
@@ -118,7 +116,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val ctx = env.startCommand
-    val targets = targetAndNext(key)
+    val targets = targetAndNext(key, env.quorumRead)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
     performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value)
@@ -130,7 +128,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   private[server] def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommand
-    val targets = targetAndNext(key)
+    val targets = targetAndNext(key, env.quorumRead)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
     performOperationWithQuorum(GetOperation(key, time, id), targets)

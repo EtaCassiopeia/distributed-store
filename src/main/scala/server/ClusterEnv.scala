@@ -13,10 +13,16 @@ import config.Env
 import jmx.JMXMonitor
 import play.api.libs.json.Json
 
-case class ClusterEnv(replicates: Int) {
+object ClusterEnv {
+  def apply(replicates: Int) = new ClusterEnv(replicates, (replicates / 2) + 1, (replicates / 2) + 1)
+  def apply(replicates: Int, quorumRead: Int, quorumWrite: Int) = new ClusterEnv(replicates, quorumRead, quorumWrite)
+}
+
+class ClusterEnv(val replicates: Int, val quorumRead: Int, val quorumWrite: Int) {
 
   private[this] val metrics = new MetricRegistry
   private[this] val commandsTimerClient = metrics.timer("operations.client")
+  private[this] val commandsAwaitTimer = metrics.timer("operations.await")
   private[this] val commandsTimerOut = metrics.timer("operations.out")
   private[this] val commandsTimerIn = metrics.timer("operations.in")
   private[this] val rollbackMeter = metrics.timer("operations.rollback")
@@ -36,6 +42,7 @@ case class ClusterEnv(replicates: Int) {
 
   private[this] val jmxReporter = Reference.empty[JmxReporter]()
 
+  def endAwait(start: Long) = commandsAwaitTimer.update(System.nanoTime() - start, TimeUnit.NANOSECONDS)
   def startQuorum = quorumTimer.time()
   def startQuorumAggr = quorumAggregateTimer.time()
   def startCommandclient = commandsTimerClient.time()

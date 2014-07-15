@@ -19,7 +19,7 @@ object EC2Node extends App {
   val httpPort = Try { args(3).toInt }.toOption.getOrElse(9999)
   val nodeName = Try { args(0) }.toOption.getOrElse("dbnode")
 
-  val env = ClusterEnv(2)
+  val env = ClusterEnv(3)
   val node1 = KeyValNode(nodeName, env)
 
   env.start(name = s"$nodeName-distributed-map", port = httpPort)
@@ -41,7 +41,7 @@ object EC2SlaveNode extends App {
   val httpPort = Try { args(2).toInt }.toOption.getOrElse(9999)
   val nodeName = Try { args(0) }.toOption.getOrElse("dbnode")
 
-  val env = ClusterEnv(2)
+  val env = ClusterEnv(3)
   val node1 = KeyValNode(nodeName, env)
 
   env.start(name = s"$nodeName-distributed-map", port = httpPort)
@@ -73,7 +73,7 @@ object EC2Client extends App {
   val fail2 = metrics.meter("operations.read.fail2")
   val fail3 = metrics.meter("operations.read.fail3")
 
-  val env = ClusterEnv(2)
+  val env = ClusterEnv(3)
   val client = NodeClient(env)
   client.start(seedNodes = Seq(s"$remoteHost:$remotePort"))
   ConsoleReporter.forRegistry(metrics).build().start(30, TimeUnit.SECONDS)

@@ -11,7 +11,7 @@ import scala.concurrent.{Await, ExecutionContext}
 package object server {
   object TargetAccessor {
     def targets(node: KeyValNode, key: String) = {
-      node.targets(key)
+      node.targets(key, 5)
     }
   }
 }
@@ -26,7 +26,7 @@ class ApiSpec extends Specification with Tags {
     implicit val timeout = Duration(1, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-    val env = ClusterEnv(4)
+    val env = ClusterEnv(5)
     val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
     val node2 = KeyValNode(s"node2-${IdGenerator.token(6)}", env)
     val node3 = KeyValNode(s"node3-${IdGenerator.token(6)}", env)

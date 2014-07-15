@@ -17,7 +17,7 @@ class BasicSpec extends Specification with Tags {
     implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-    val env = ClusterEnv(0)
+    val env = ClusterEnv(1)
     val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
     val client = NodeClient(env)
 
@@ -99,8 +99,8 @@ class ConcurrentUsageSpec extends Specification with Tags {
   "Distributed Map" should {
 
     val nbrClients = 8
-    val nbrNodes = 4
-    val nbrReplicates = 2
+    val nbrNodes = 6
+    val nbrReplicates = 3
     implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
     val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))

@@ -16,7 +16,7 @@ class NodeClient(env: ClusterEnv, node: KeyValNode)  {
   }
 
   def stop(): NodeClient = {
-    node.stop()
+    node.stop().destroy()
     this
   }
 

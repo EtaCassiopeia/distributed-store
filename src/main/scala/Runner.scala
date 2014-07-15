@@ -19,7 +19,7 @@ object Host1WithClient extends App {
 
   val nbrClients = 100
   val nbrNodes = 4
-  val nbrReplicates = 2
+  val nbrReplicates = 3
   implicit val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
   val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))
@@ -109,7 +109,7 @@ object Host2 extends App {
   implicit val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-  val env = ClusterEnv(2)
+  val env = ClusterEnv(3)
   val node1 = KeyValNode(s"node1", env)
   val node2 = KeyValNode(s"node2", env)
   val node3 = KeyValNode(s"node3", env)

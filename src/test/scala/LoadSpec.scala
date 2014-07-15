@@ -31,7 +31,7 @@ class LoadSpec extends Specification with Tags {
 
   "Distributed Map" should {
 
-    val env = ClusterEnv(4)
+    val env = ClusterEnv(5)
     val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
     val node2 = KeyValNode(s"node2-${IdGenerator.token(6)}", env)
     val node3 = KeyValNode(s"node3-${IdGenerator.token(6)}", env)

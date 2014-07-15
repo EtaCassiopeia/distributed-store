@@ -6,9 +6,18 @@ import config.Env
 
 class NodeServiceWorker(node: KeyValNode) extends Actor {
   override def receive: Receive = {
-    case o @ GetOperation(key, t, id) => sender() ! node.db.getOperation(o)
-    case o @ SetOperation(key, value, t, id) => sender() ! node.db.setOperation(o)
-    case o @ DeleteOperation(key, t, id) => sender() ! node.db.deleteOperation(o)
+    case o @ GetOperation(key, t, id, start) => {
+      sender() ! node.db.getOperation(o)
+      node.env.endAwait(start)
+    }
+    case o @  SetOperation(key, value, t, id, start) => {
+      sender() ! node.db.setOperation(o)
+      node.env.endAwait(start)
+    }
+    case o @ DeleteOperation(key, t, id, start) => {
+      sender() ! node.db.deleteOperation(o)
+      node.env.endAwait(start)
+    }
     case _ =>
   }
 }
@@ -25,9 +34,9 @@ class NodeService(node: KeyValNode) extends Actor {
     workers(id % Env.workers)
   }
   override def receive: Receive = {
-    case o @ GetOperation(key, t, id) => worker(key) forward o
-    case o @ SetOperation(key, value, t, id) => worker(key) forward o
-    case o @ DeleteOperation(key, t, id) => worker(key) forward o
+    case o @ GetOperation(key, _, _, _) => worker(key) forward o
+    case o @ SetOperation(key, _, _, _, _) => worker(key) forward o
+    case o @ DeleteOperation(key, _, _, _) => worker(key) forward o
     case r @ Rollback(status) => {
       val ctx = node.env.rollback
       node.lock(status.key)

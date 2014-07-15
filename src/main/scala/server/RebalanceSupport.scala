@@ -15,7 +15,7 @@ trait RebalanceSupport { self: KeyValNode =>
 
   private[server] def rebalance(): Unit = {
     implicit val ec = system().dispatcher
-    if (rebalanceRun.compareAndSet(false, true)) {
+    if (running.get() && rebalanceRun.compareAndSet(false, true)) {
       system().scheduler.scheduleOnce(Env.rebalanceConflate) {
         blockingRebalance()
         rebalanceRun.compareAndSet(true, false)
