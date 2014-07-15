@@ -12,11 +12,11 @@ object JMXMonitor {
 
   lazy val mbs = ManagementFactory.getPlatformMBeanServer
 
-  def data(): JsArray = {
+  def data(name: String): JsArray = {
     var obj = Json.arr()
     Try {
-      for (objectname <- mbs.queryNames(new ObjectName("distributed-map:name=*"), null).toList.sortWith { (o1, o2) => o1.getCanonicalName.compareTo(o2.getCanonicalName) < 0 }) {
-        var bean = Json.obj("name" -> objectname.getCanonicalName.replace("distributed-map:name=", "").replace(".", "-"))
+      for (objectname <- mbs.queryNames(new ObjectName(s"$name:name=*"), null).toList.sortWith { (o1, o2) => o1.getCanonicalName.compareTo(o2.getCanonicalName) < 0 }) {
+        var bean = Json.obj("name" -> objectname.getCanonicalName.replace(s"$name:name=", "").replace(".", "-"))
         mbs.getMBeanInfo(objectname).getAttributes.map { info =>
           mbs.getAttribute(objectname, info.getName) match {
             case a if a.getClass == classOf[String] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[String])

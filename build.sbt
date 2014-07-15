@@ -1,3 +1,8 @@
+import sbtassembly.Plugin._
+import sbtassembly.Plugin.AssemblyKeys._
+
+assemblySettings
+
 name := "distributed-map"
 
 version := "1.0-SNAPSHOT"
@@ -30,4 +35,7 @@ libraryDependencies += "com.librato.metrics"       % "metrics-librato"          
 
 libraryDependencies += "org.specs2"                %% "specs2"                   % "2.3.12"            % "test"
 
+jarName in assembly := "distributed-store.jar"
+
+test in assembly := {}
 

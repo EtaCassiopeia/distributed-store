@@ -6,9 +6,9 @@ import config.Env
 
 class NodeServiceWorker(node: KeyValNode) extends Actor {
   override def receive: Receive = {
-    case o @ GetOperation(key, t, id) => sender() ! node.getOperation(o)
-    case o @ SetOperation(key, value, t, id) => sender() ! node.setOperation(o)
-    case o @ DeleteOperation(key, t, id) => sender() ! node.deleteOperation(o)
+    case o @ GetOperation(key, t, id) => sender() ! node.db.getOperation(o)
+    case o @ SetOperation(key, value, t, id) => sender() ! node.db.setOperation(o)
+    case o @ DeleteOperation(key, t, id) => sender() ! node.db.deleteOperation(o)
     case _ =>
   }
 }
@@ -30,18 +30,18 @@ class NodeService(node: KeyValNode) extends Actor {
     case o @ DeleteOperation(key, t, id) => worker(key) forward o
     case r @ Rollback(status) => {
       val ctx = node.env.rollback
-      node.locks.putIfAbsent(status.key, ())
+      node.lock(status.key)
       // Rollback management : here be dragons
       // Todo : use timestamp to check if rollback
-      val opt = node.getOperation(GetOperation(status.key, 0L, 0L)).value
-      if (opt.isDefined && status.old.isEmpty) node.deleteOperation(DeleteOperation(status.key, 0L, 0L))
-      else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
-      else if (opt.isEmpty && status.old.isDefined) node.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
-      node.locks.remove(status.key)
+      val opt = node.db.getOperation(GetOperation(status.key, 0L, 0L)).value
+      if (opt.isDefined && status.old.isEmpty) node.db.deleteOperation(DeleteOperation(status.key, 0L, 0L))
+      else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) node.db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+      else if (opt.isEmpty && status.old.isDefined) node.db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+      node.unlock(status.key)
       ctx.close()
     }
     case SyncCacheAndBalance() => {
-      node.syncCacheIfNecessary(true)
+      node.db.forceSync()
       node.rebalance()
     }
     case _ =>

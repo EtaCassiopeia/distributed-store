@@ -34,7 +34,7 @@ case class ClusterEnv(replicates: Int) {
   private[this] val quorumTimer = metrics.timer("quorum.time")
   private[this] val quorumAggregateTimer = metrics.timer("quorum.aggregate")
 
-  private[this] val jmxReporter = JmxReporter.forRegistry(metrics).inDomain("distributed-map").build()
+  private[this] val jmxReporter = Reference.empty[JmxReporter]()
 
   def startQuorum = quorumTimer.time()
   def startQuorumAggr = quorumAggregateTimer.time()
@@ -56,20 +56,16 @@ case class ClusterEnv(replicates: Int) {
 
   private[this] val server = Reference.empty[HttpServer]()
 
-  def start() = {
-    jmxReporter.start()
+  def start(name: String = "distributed-map", port: Int = 9999) = {
 
-    // val username = "foo.bar@gmail.com"
-    // val token = IdGenerator.token
-    // LibratoReporter.builder(metrics, username, token, "distributed-map")
-    //   .setHttpPoster(NingHttpPoster.newPoster(username, token, "http://localhost:9000"))
-    //   .build().start(10, TimeUnit.SECONDS)
+    jmxReporter <== JmxReporter.forRegistry(metrics).inDomain(name).build()
+    jmxReporter().start()
 
-    server <== HttpServer.create(new InetSocketAddress("0.0.0.0", 9999), 0)
+    server <== HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0)
     server().setExecutor(Executors.newFixedThreadPool(1))
     server().createContext("/metrics.json", new HttpHandler {
       override def handle(p1: HttpExchange): Unit = {
-        val data = Json.stringify(JMXMonitor.data()).getBytes(Charset.forName("UTF-8"))
+        val data = Json.stringify(JMXMonitor.data(name)).getBytes(Charset.forName("UTF-8"))
         p1.getResponseHeaders.add("Content-Type", "application/json")
         p1.getResponseHeaders.add("Content-Length", data.length + "")
         p1.getResponseHeaders.add("Access-Control-Allow-Origin", "*")
@@ -83,7 +79,7 @@ case class ClusterEnv(replicates: Int) {
 
   def stop() = {
     server.foreach(_.stop(0))
-    jmxReporter.stop()
+    jmxReporter().stop()
   }
 }
 

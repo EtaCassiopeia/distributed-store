@@ -1,14 +1,15 @@
 package server
 
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{ConcurrentHashMap, ConcurrentLinkedQueue}
 
 import akka.actor.{Actor, Address}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member}
 import com.google.common.hash.{HashCode, Hashing}
-import common.{Reference, Logger}
+import common.Logger
 import config.Env
-import collection.JavaConversions._
+
+import scala.collection.JavaConversions._
 
 class NodeClusterWatcher(node: KeyValNode) extends Actor {
   override def preStart(): Unit = {
@@ -17,15 +18,15 @@ class NodeClusterWatcher(node: KeyValNode) extends Actor {
   }
   override def receive: Receive = {
     case MemberUp(member) => {
-      node.updateMembers()
+      node.fetchAndUpdate()
       node.rebalance()
     }
     case UnreachableMember(member) => {
-      node.updateMembers()
+      node.fetchAndUpdate()
       node.rebalance()
     }
     case MemberRemoved(member, previousStatus) => {
-      node.updateMembers()
+      node.fetchAndUpdate()
       node.rebalance()
     }
     case _ =>
@@ -34,30 +35,41 @@ class NodeClusterWatcher(node: KeyValNode) extends Actor {
 
 trait ClusterSupport { self: KeyValNode =>
 
-  private[server] val membersCache = Reference.empty[Seq[Member]]()
+  private[server] val membersCache = new ConcurrentLinkedQueue[Member]()
+  private[server] val murmurCache = new ConcurrentHashMap[String, Long]()
 
-  private[server] def members(): Seq[Member] = membersCache.getOrElse(updateMembers())
+  private[server] def members(): Seq[Member] = {
+    if (membersCache.size == 0) {
+      val m = updateMembers()
+      membersCache.clear()
+      membersCache.addAll(m)
+    }
+    membersCache.toSeq
+  }
 
-  private[server] val cache = new ConcurrentHashMap[String, Long]()
+  private[server] def fetchAndUpdate() {
+    val m = updateMembers()
+    membersCache.clear()
+    membersCache.addAll(m)
+  }
 
-  private[server] def updateMembers(): Seq[Member] = {
+  private def updateMembers(): Seq[Member] = {
     val murmur = Hashing.murmur3_128()
-    membersCache <== cluster().state.getMembers.toSeq.filter(_.getRoles.contains(Env.nodeRole)).sortWith { (member1, member2) =>
+    cluster().state.getMembers.toSeq.filter(_.getRoles.contains(Env.nodeRole)).sortWith { (member1, member2) =>
       val key1 = member1.address.toString
       val key2 = member2.address.toString
-      val hash1 = Option(cache.get(key1)).getOrElse {
+      val hash1 = Option(murmurCache.get(key1)).getOrElse {
         val m = murmur.hashString(key1, Env.UTF8).asLong()
-        cache.putIfAbsent(key1, m)
+        murmurCache.putIfAbsent(key1, m)
         m
       }
-      val hash2 = Option(cache.get(key2)).getOrElse {
+      val hash2 = Option(murmurCache.get(key2)).getOrElse {
         val m = murmur.hashString(key2, Env.UTF8).asLong()
-        cache.putIfAbsent(key2, m)
+        murmurCache.putIfAbsent(key2, m)
         m
       }
       hash1.compareTo(hash2) < 0
     }
-    membersCache()
   }
 
   private[server] def listOfNodes(): Seq[Member] = members()
