@@ -20,22 +20,31 @@ trait QuorumSupport { self: KeyValNode =>
       case _: GetOperation => env.quorumRead
       case _ => env.quorumWrite
     }
+    val actorSys = system()
+    val address = cluster().selfAddress
+    val selection = actorSys.actorSelection(s"/user/${Env.mapService}")
     def actualOperation(): Future[OpStatus] = {
       val ctx1 = env.startQuorumAggr
       targets.map { member =>
-        Try {
-          system().actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
-            case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
+        //Try {
+          if (member.address == address) {
+            selection.ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+              case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
+            }
+          } else {
+            actorSys.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+              case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
+            }
           }
-        } match {
-          case Success(f) => f
-          case Failure(e) => Future.successful(LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member))
-        }
+        //} match {
+        //  case Success(f) => f
+        //  case Failure(e) => Future.successful(LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member))
+        //}
       }.asFuture.andThen {
         case _ => ctx1.close()
       }.map { lll =>
-        val fuStatuses = lll.map(_.ops)
         val ctx2 = env.startQuorum
+        val fuStatuses = lll.map(_.ops)
         val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
         if (successfulStatuses.size < quorumNbr) {
           Logger.trace(s"Operation failed : quorum was ${successfulStatuses.size} success / $quorumNbr mandatory")

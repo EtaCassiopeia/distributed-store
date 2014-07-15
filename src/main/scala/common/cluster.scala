@@ -78,7 +78,7 @@ object SeedHelper {
     }.toOption.getOrElse(Random.nextInt(1000) + 7000)
   }
 
-  def manuallyBootstrap(address: String, port: Int, configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): ClusterConfig = {
+  def manualBootstrap(address: String, port: Int, configuration: Configuration, clientOnly: Boolean)(implicit ec: ExecutionContext): ClusterConfig = {
     val configBuilder = new StringBuilder()
     var config = configuration.underlying.getConfig("map-config")
     val fallback = configuration.underlying.getConfig("map-config")
@@ -87,7 +87,9 @@ object SeedHelper {
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
     if (clientOnly) {
-      configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-CLIENT"]\n""")
+      configBuilder.append(s"""akka.cluster.roles=["${Env.clientRole}"]\n""")
+    } else {
+      configBuilder.append(s"""akka.cluster.roles=["${Env.nodeRole}"]\n""")
     }
     config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
     Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")
@@ -103,7 +105,9 @@ object SeedHelper {
     configBuilder.append(s"akka.remote.netty.tcp.port=$port\n")
     configBuilder.append(s"akka.remote.netty.tcp.hostname=$address\n")
     if (clientOnly) {
-      configBuilder.append(s"""akka.cluster.roles=["DISTRIBUTED-MAP-CLIENT"]\n""")
+      configBuilder.append(s"""akka.cluster.roles=["${Env.clientRole}"]\n""")
+    } else {
+      configBuilder.append(s"""akka.cluster.roles=["${Env.nodeRole}"]\n""")
     }
     config = ConfigFactory.parseString(configBuilder.toString()).withFallback(fallback)
     Logger("SeedHelper").debug(s"Akka remoting will be bound to akka.tcp://${Env.systemName}@$address:$port")

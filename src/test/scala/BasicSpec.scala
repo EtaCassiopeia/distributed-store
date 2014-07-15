@@ -8,6 +8,7 @@ import server.{NodeClient, ClusterEnv, KeyValNode}
 
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.concurrent.duration.Duration
+import scala.util.Try
 
 class BasicSpec extends Specification with Tags {
   sequential
@@ -100,12 +101,13 @@ class ConcurrentUsageSpec extends Specification with Tags {
 
     val nbrClients = 8
     val nbrNodes = 6
-    val nbrReplicates = 3
+    val nbrReplicates = 4
+    val counter = new AtomicInteger(0)
     implicit val timeout = Duration(10, TimeUnit.SECONDS)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
     val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))
 
-    val env = ClusterEnv(nbrReplicates)
+    val env = ClusterEnv(nbrReplicates, 2, 3)
     var nodes = List[KeyValNode]()
     (0 to nbrNodes).foreach { i =>
       nodes = nodes :+ KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
@@ -132,7 +134,7 @@ class ConcurrentUsageSpec extends Specification with Tags {
             Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
           }
           seq.foreach { id =>
-            Await.result(client.get(id), timeout) should not beNone
+            Try { Await.result(client.get(id), timeout) should not beNone }.toOption.foreach(_ => counter.incrementAndGet())
           }
           seq.foreach { id =>
             Await.result(client.delete(id), timeout)
@@ -155,5 +157,7 @@ class ConcurrentUsageSpec extends Specification with Tags {
       env.stop()
       success
     }
+
+    s"\n\n=====================================\nSpec ended with ${counter.get()} errors ...\n=====================================\n" in ok
   }
 }
