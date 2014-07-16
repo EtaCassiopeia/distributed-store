@@ -37,7 +37,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   private[server] def syncNode(ec: ExecutionContext): Unit = {
     Try {
       system().scheduler.scheduleOnce(Env.autoResync) {
-        Try { blockingRebalance() }
+        rebalance()
         syncNode(ec)
       }(ec)
     }

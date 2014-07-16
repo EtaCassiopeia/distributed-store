@@ -40,14 +40,21 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   restore()
 
   def commitFileTooBig(): Boolean = {
-    if (checkSize.compareAndSet(50, 0)) {
+    checkSize.incrementAndGet()
+    if (checkSize.compareAndSet(100, 0)) {
       commitLog.length() > (16 * (1024 * 1024))
     } else {
       false
     }
   }
 
-  def rotateLog(before: () => Unit = () => (), set: (String, String) => Unit, delete: (String) => Unit, after: () => Unit = () => (), fin: () => Unit = () => ()): Unit = {
+  def rotateLog(
+                 before: () => Unit = () => (),
+                 set: (String, String) => Unit,
+                 delete: (String) => Unit,
+                 after: () => Unit = () => (),
+                 end: () => Unit = () => ()
+  ): Unit = {
     val back = new File(path, s"commit.snapshot-${IdGenerator.token(8)}")
     Files.move(commitLog, back)
     commitLog.createNewFile()
@@ -64,7 +71,7 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
       back.delete()
       back.deleteOnExit()
     } finally {
-      fin()
+      end()
     }
   }
 
@@ -72,30 +79,13 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     keySet.clear()
     memoryTable.clear()
     removedCache.clear()
-    //val back = new File(path, s"commit.snapshot-${IdGenerator.token(8)}")
-    //Files.move(commitLog, back)
-    //commitLog.createNewFile()
     val batch = db.createWriteBatch()
     rotateLog(
       set = (key, json) => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json)),
       delete = key => batch.delete(Iq80DBFactory.bytes(key)),
       after = () => db.write(batch),
-      fin = () => batch.close()
+      end = () => batch.close()
     )
-    //try {
-    //  Files.readLines(back, Env.UTF8).foreach { line =>
-    //    line.split("\\:\\:\\:").toList match {
-    //      case "SET" :: key :: json :: Nil => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json))
-    //      case "DELETE" :: key :: Nil => batch.delete(Iq80DBFactory.bytes(key))
-    //      case _ =>
-    //    }
-    //  }
-    //  db.write(batch)
-    //  back.delete()
-    //  back.deleteOnExit()
-    //} finally {
-    //  batch.close()
-    //}
     db.iterator().foreach { e =>
       keySet.add(Iq80DBFactory.asString(e.getKey))
     }
@@ -159,33 +149,12 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
             set = (key, json) => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json)),
             delete = key => batch.delete(Iq80DBFactory.bytes(key)),
             after = () => db.write(batch),
-            fin = () => {
+            end = () => {
               batch.close()
               ctx.close()
               syncRunning.compareAndSet(true, false)
             }
           )
-          //val back = new File(path, s"commit.copy-${IdGenerator.token(8)}")
-          //Files.move(commitLog, back)
-          //commitLog.createNewFile()
-          //memoryTable.clear()
-          //removedCache.clear()
-          //try {
-          //  Files.readLines(back, Env.UTF8).foreach { line =>
-          //    line.split("\\:\\:\\:").toList match {
-          //      case "SET" :: key :: json :: Nil => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json))
-          //      case "DELETE" :: key :: Nil => batch.delete(Iq80DBFactory.bytes(key))
-          //      case _ =>
-          //    }
-          //  }
-          //  db.write(batch)
-          //  back.delete()
-          //  back.deleteOnExit()
-          //} finally {
-          //  batch.close()
-          //  ctx.close()
-          //  syncRunning.compareAndSet(true, false)
-          //}
         }
       }
     }
@@ -211,11 +180,6 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     keySet.remove(key)
     removedCache.add(key)
     Option(memoryTable.remove(key))
-    //Try {
-      //val opt1 = Option(memoryTable.remove(key))
-      //val opt2 = Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(key)))).map(Json.parse)
-      //if (opt1.isDefined) opt1 else opt2
-    //}.toOption.flatten
   }
 
   def setOperation(op: SetOperation, rollback: Boolean = false): OpStatus = {

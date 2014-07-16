@@ -10,8 +10,8 @@ import scala.util.{Failure, Success}
 
 trait RebalanceSupport { self: KeyValNode =>
 
-  private[server] val rebalanceRun = new AtomicBoolean(false)
-  private[server] val rebalanceRunAgain = new AtomicBoolean(false)
+  private[this] val rebalanceRun = new AtomicBoolean(false)
+  private[this] val rebalanceRunAgain = new AtomicBoolean(false)
 
   private[server] def rebalance(): Unit = {
     implicit val ec = system().dispatcher
@@ -37,9 +37,11 @@ trait RebalanceSupport { self: KeyValNode =>
       val nodes = numberOfNodes()
       val keys = db.keys()
       val rebalanced = new AtomicInteger(0)
+      val selfAddress = cluster().selfAddress
       val filtered = keys.filter { key =>
-        val t = target(key)
-        !t.address.toString.contains(cluster().selfAddress.toString)
+        val t = targets(key, env.replicates)
+        !t.contains(selfAddress)
+        //!t.address.toString.contains(selfAddress.toString)
       }
       Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
       filtered.map { key =>

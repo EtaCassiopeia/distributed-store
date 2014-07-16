@@ -60,5 +60,5 @@ class NodeClient(env: Metrics, node: KeyValNode)  {
 }
 
 object NodeClient {
-  def apply(env: ClusterEnv) = new NodeClient(env.metrics, new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, env.metrics, true))
+  def apply(env: ClusterEnv) = new NodeClient(env.metrics, new KeyValNode(s"client-${IdGenerator.token(10)}", new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, env.metrics, true))
 }

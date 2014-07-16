@@ -26,20 +26,15 @@ trait QuorumSupport { self: KeyValNode =>
     def actualOperation(): Future[OpStatus] = {
       val ctx1 = metrics.startQuorumAggr
       targets.map { member =>
-        //Try {
-          if (member.address == address) {
-            selection.ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
-              case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
-            }
-          } else {
-            actorSys.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
-              case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
-            }
+        if (member.address == address) {
+          selection.ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+            case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
-        //} match {
-        //  case Success(f) => f
-        //  case Failure(e) => Future.successful(LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member))
-        //}
+        } else {
+          actorSys.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+            case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
+          }
+        }
       }.asFuture.andThen {
         case _ => ctx1.close()
       }.map { lll =>
