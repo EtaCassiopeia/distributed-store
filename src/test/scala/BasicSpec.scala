@@ -113,6 +113,74 @@ class ConcurrentUsageSpec extends Specification with Tags {
     (0 to nbrNodes).foreach { i =>
       nodes = nodes :+ KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
     }
+    val client = NodeClient(env)
+
+    "Start nodes" in {
+      val port = new AtomicInteger(6999)
+      nodes.foreach(_.start("127.0.0.1", port.incrementAndGet(), Seq("127.0.0.1:7000")))
+      client.start(Seq("127.0.0.1:7000"))
+      Thread.sleep(10000)   // Wait for cluster setup
+      env.start()
+      success
+    }
+
+    "Let user do some stuff" in {
+
+      def scenario(client: NodeClient): Unit = {
+        for (i <- 0 to 100) {
+          var seq = Seq[String]()
+          for (j <- 0 to 100) {
+            val id = IdGenerator.uuid
+            seq = seq :+ id
+            Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+          }
+          seq.foreach { id =>
+            Try { Await.result(client.get(id), timeout) should not beNone }.toOption.foreach(_ => counter.incrementAndGet())
+          }
+          seq.foreach { id =>
+            Await.result(client.delete(id), timeout)
+          }
+        }
+      }
+      var list = List[Future[Unit]]()
+      (0 to nbrClients).foreach { i =>
+        list = list :+ Future(scenario(client))(userEc)
+      }
+      val fu = Future.sequence(list)
+      Await.result(fu, Duration(600, TimeUnit.SECONDS))
+      success
+    }
+
+    "Stop the nodes" in {
+      nodes.foreach(_.displayStats().stop().destroy())
+      client.stop()
+      Thread.sleep(2000)
+      env.stop()
+      success
+    }
+
+    s"\n\n=====================================\nSpec ended with ${counter.get()} errors ...\n=====================================\n" in ok
+  }
+}
+
+class ConcurrentUsageConcurrentClientsSpec extends Specification with Tags {
+  sequential
+
+  "Distributed Map" should {
+
+    val nbrClients = 8
+    val nbrNodes = 6
+    val nbrReplicates = 4
+    val counter = new AtomicInteger(0)
+    implicit val timeout = Duration(10, TimeUnit.SECONDS)
+    implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
+    val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))
+
+    val env = ClusterEnv(nbrReplicates)
+    var nodes = List[KeyValNode]()
+    (0 to nbrNodes).foreach { i =>
+      nodes = nodes :+ KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
+    }
     var clients = List[NodeClient]()
     (0 to nbrClients).foreach { i =>
       clients = clients :+ NodeClient(env)

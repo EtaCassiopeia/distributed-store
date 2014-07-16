@@ -2,10 +2,12 @@ package server
 
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicLong, AtomicBoolean}
 
 import com.codahale.metrics.Timer.Context
-import common.{Configuration, Logger}
+import com.google.common.collect.Sets
+import com.google.common.io.Files
+import common.{IdGenerator, Configuration, Logger}
 import config.{ClusterEnv, Env}
 import metrics.Metrics
 import org.iq80.leveldb.Options
@@ -17,22 +19,86 @@ import scala.util.{Failure, Success, Try}
 
 class OnDiskStore(val name: String, val config: Configuration, val path: File, val metricsenv: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean) {
 
-  val commitLog = new File(path, "commits.log")
+  private[this] val commitLog = new File(path, "commit.log")
 
   if (!path.exists()) path.mkdirs()
   if (!commitLog.exists()) commitLog.createNewFile()
 
-  val options = new Options()
-  val db = Iq80DBFactory.factory.open(new File(path, "leveldb"), options)
-  val cache = new ConcurrentHashMap[String, JsValue]()
-  val cacheSetCount = new AtomicInteger(0)
+  private[this] val options = new Options()
+  private[this] val db = Iq80DBFactory.factory.open(new File(path, "leveldb"), options)
+
+  private[this] val keySet = Sets.newConcurrentHashSet[String]()
+  private[this] val memoryTable = new ConcurrentHashMap[String, JsValue]()
+  private[this] val removedCache = Sets.newConcurrentHashSet[String]()
+  private[this] val syncRunning = new AtomicBoolean(false)
+  private[this] val checkSize = new AtomicLong(0L)
+
   private[this] val locks = new ConcurrentHashMap[String, Unit]()
 
   options.createIfMissing(true)
 
+  restore()
+
+  def commitFileTooBig(): Boolean = {
+    if (checkSize.compareAndSet(50, 0)) {
+      commitLog.length() > (16 * (1024 * 1024))
+    } else {
+      false
+    }
+  }
+
+  def rotateLog(before: () => Unit = () => (), set: (String, String) => Unit, delete: (String) => Unit, after: () => Unit = () => (), fin: () => Unit = () => ()): Unit = {
+    val back = new File(path, s"commit.snapshot-${IdGenerator.token(8)}")
+    Files.move(commitLog, back)
+    commitLog.createNewFile()
+    before()
+    try {
+      Files.readLines(back, Env.UTF8).foreach { line =>
+        line.split("\\:\\:\\:").toList match {
+          case "SET" :: key :: json :: Nil => set(key, json)
+          case "DELETE" :: key :: Nil => delete(key)
+          case _ =>
+        }
+      }
+      after()
+      back.delete()
+      back.deleteOnExit()
+    } finally {
+      fin()
+    }
+  }
+
   def restore() = {
-    // TODO : restore from commit log
-    // TODO : populate key cache
+    keySet.clear()
+    memoryTable.clear()
+    removedCache.clear()
+    //val back = new File(path, s"commit.snapshot-${IdGenerator.token(8)}")
+    //Files.move(commitLog, back)
+    //commitLog.createNewFile()
+    val batch = db.createWriteBatch()
+    rotateLog(
+      set = (key, json) => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json)),
+      delete = key => batch.delete(Iq80DBFactory.bytes(key)),
+      after = () => db.write(batch),
+      fin = () => batch.close()
+    )
+    //try {
+    //  Files.readLines(back, Env.UTF8).foreach { line =>
+    //    line.split("\\:\\:\\:").toList match {
+    //      case "SET" :: key :: json :: Nil => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json))
+    //      case "DELETE" :: key :: Nil => batch.delete(Iq80DBFactory.bytes(key))
+    //      case _ =>
+    //    }
+    //  }
+    //  db.write(batch)
+    //  back.delete()
+    //  back.deleteOnExit()
+    //} finally {
+    //  batch.close()
+    //}
+    db.iterator().foreach { e =>
+      keySet.add(Iq80DBFactory.asString(e.getKey))
+    }
   }
 
   def locked(key: String) = {
@@ -47,11 +113,9 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     locks.remove(key)
   }
 
-  def keys(): List[String] =  Try(db.iterator().toList.map(e => Iq80DBFactory.asString(e.getKey))).toOption.getOrElse(List())
+  def keys(): List[String] =  keySet.toList
 
   def close(): Unit = db.close()
-
-  def forceSync() = syncCacheIfNecessary(true)
 
   def destroy(): Unit = {
     Iq80DBFactory.factory.destroy(path, options)
@@ -59,13 +123,6 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     commitLog.deleteOnExit()
     path.delete()
     path.deleteOnExit()
-  }
-
-  private def setLevelDB(op: SetOperation): OpStatus = {
-    Try { db.put(Iq80DBFactory.bytes(op.key), Iq80DBFactory.bytes(Json.stringify(op.value))) } match {
-      case Success(s) => OpStatus(true, op.key, None, op.timestamp, op.operationId)
-      case Failure(e) => OpStatus(false, op.key, None, op.timestamp, op.operationId)
-    }
   }
 
   private def awaitForUnlock(key: String, perform: => OpStatus, failStatus: OpStatus, ctx: Context, ctx2: Context): OpStatus = {
@@ -85,54 +142,89 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     } else perform
   }
 
+  def forceSync() = syncCacheIfNecessary()
 
-  private def syncCacheIfNecessary(force: Boolean): Unit = {
-    if (!clientOnly)
-      if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
-        val ctx = metrics.cacheSync
-        Logger.trace(s"[$name] Sync cache with LevelDB ...")
-        val batch = db.createWriteBatch()
-        try {
-          cache.entrySet().foreach { e =>
-            //lock(e.getKey)
-            batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue)))
-          }
-          db.write(batch)
-        } finally {
-          batch.close()
-          //cache.entrySet().foreach { e => unlock(e.getKey) }
-          cache.clear()
-          ctx.close()
-        }
-      } else if (force) {
-        val ctx = metrics.cacheSync
-        cacheSetCount.set(0)
-        Logger.info(s"[$name] Sync cache with LevelDB ...")
-        val batch = db.createWriteBatch()
-        try {
-          cache.entrySet().foreach { e =>
-            //lock(e.getKey)
-            batch.put(Iq80DBFactory.bytes(e.getKey), Iq80DBFactory.bytes(Json.stringify(e.getValue)))
-          }
-          db.write(batch)
-        } finally {
-          batch.close()
-          //cache.entrySet().foreach { e => unlock(e.getKey) }
-          cache.clear()
-          ctx.close()
+  private def syncCacheIfNecessary(): Unit = {
+    if (!clientOnly) {
+      if (commitFileTooBig()) {
+        if (syncRunning.compareAndSet(false, true)) {
+          val ctx = metrics.cacheSync
+          Logger.trace(s"[$name] Sync cache with LevelDB ...")
+          val batch = db.createWriteBatch()
+          rotateLog(
+            before =  () => {
+              memoryTable.clear()
+              removedCache.clear()
+            },
+            set = (key, json) => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json)),
+            delete = key => batch.delete(Iq80DBFactory.bytes(key)),
+            after = () => db.write(batch),
+            fin = () => {
+              batch.close()
+              ctx.close()
+              syncRunning.compareAndSet(true, false)
+            }
+          )
+          //val back = new File(path, s"commit.copy-${IdGenerator.token(8)}")
+          //Files.move(commitLog, back)
+          //commitLog.createNewFile()
+          //memoryTable.clear()
+          //removedCache.clear()
+          //try {
+          //  Files.readLines(back, Env.UTF8).foreach { line =>
+          //    line.split("\\:\\:\\:").toList match {
+          //      case "SET" :: key :: json :: Nil => batch.put(Iq80DBFactory.bytes(key), Iq80DBFactory.bytes(json))
+          //      case "DELETE" :: key :: Nil => batch.delete(Iq80DBFactory.bytes(key))
+          //      case _ =>
+          //    }
+          //  }
+          //  db.write(batch)
+          //  back.delete()
+          //  back.deleteOnExit()
+          //} finally {
+          //  batch.close()
+          //  ctx.close()
+          //  syncRunning.compareAndSet(true, false)
+          //}
         }
       }
+    }
+  }
+
+  private[this] def set(key: String, value: JsValue) = {
+    keySet.add(key)
+    if (removedCache.contains(key)) removedCache.remove(key)
+    Option(memoryTable.put(key, value))
+  }
+
+  private[this] def get(key: String) = {
+    if (memoryTable.containsKey(key)) {
+      Some(memoryTable.get(key))
+    } else if (removedCache.contains(key)) {
+      None
+    } else {
+      Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(key)))).map(Json.parse)
+    }
+  }
+
+  private[this] def delete(key: String) = {
+    keySet.remove(key)
+    removedCache.add(key)
+    Option(memoryTable.remove(key))
+    //Try {
+      //val opt1 = Option(memoryTable.remove(key))
+      //val opt2 = Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(key)))).map(Json.parse)
+      //if (opt1.isDefined) opt1 else opt2
+    //}.toOption.flatten
   }
 
   def setOperation(op: SetOperation, rollback: Boolean = false): OpStatus = {
     val ctx = metrics.startCommandIn
     val ctx2 = metrics.write
     def perform = {
-      syncCacheIfNecessary(false)
-      //lock(op.key)
-      val old = Option(cache.put(op.key, op.value))
-      //unlock(op.key)
-      cacheSetCount.incrementAndGet()
+      syncCacheIfNecessary()
+      Files.append(s"SET:::${op.key}:::${Json.stringify(op.value)}\n", commitLog, Env.UTF8)
+      val old = set(op.key, op.value)
       ctx.close()
       ctx2.close()
       OpStatus(true, op.key, None, op.timestamp, op.operationId, old)
@@ -145,16 +237,11 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     val ctx = metrics.startCommandIn
     val ctx2 = metrics.delete
     def perform = {
-      syncCacheIfNecessary(false)
-      //lock(op.key)
-      val old = Try {
-        val opt1 = Option(cache.remove(op.key))
-        val opt2 = Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-        if (opt1.isDefined) opt1 else opt2
-      }.toOption.flatten
+      syncCacheIfNecessary()
+      Files.append(s"DELETE:::${op.key}\n", commitLog, Env.UTF8)
+      val old = delete(op.key)
       Try {
         db.delete(Iq80DBFactory.bytes(op.key))
-        //unlock(op.key)
         ctx.close()
         ctx2.close()
       } match {
@@ -170,21 +257,11 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     val ctx = metrics.startCommandIn
     val ctx2 = metrics.read
     def perform = {
-      syncCacheIfNecessary(false)
-      //lock(op.key)
-      if (cache.containsKey(op.key)) {
-        ctx.close()
-        ctx2.close()
-        val fromCache = Option(cache.get(op.key))
-        //unlock(op.key)
-        OpStatus(true, op.key, fromCache, op.timestamp, op.operationId)
-      } else {
-        val opt = Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(op.key)))).map(Json.parse)
-        //unlock(op.key)
-        ctx.close()
-        ctx2.close()
-        OpStatus(true, op.key, opt, op.timestamp, op.operationId)
-      }
+      syncCacheIfNecessary()
+      val opt = get(op.key)
+      ctx.close()
+      ctx2.close()
+      OpStatus(true, op.key, opt, op.timestamp, op.operationId)
     }
     val fail = OpStatus(false, op.key, None, op.timestamp, op.operationId)
     awaitForUnlock(op.key, perform, fail, ctx, ctx2)
