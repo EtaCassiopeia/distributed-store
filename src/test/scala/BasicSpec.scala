@@ -107,17 +107,20 @@ class ConcurrentUsageSpec extends Specification with Tags {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
     val userEc = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(nbrClients))
 
-    val env = ClusterEnv(nbrReplicates, 2, 3)
+    val env = ClusterEnv(nbrReplicates)
     var nodes = List[KeyValNode]()
     (0 to nbrNodes).foreach { i =>
       nodes = nodes :+ KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
     }
-    val client = NodeClient(env)
+    var clients = List[NodeClient]()
+    (0 to nbrClients).foreach { i =>
+      clients = clients :+ NodeClient(env)
+    }
 
     "Start nodes" in {
       val port = new AtomicInteger(6999)
       nodes.foreach(_.start("127.0.0.1", port.incrementAndGet(), Seq("127.0.0.1:7000")))
-      client.start(Seq("127.0.0.1:7000"))
+      clients.foreach(_.start(Seq("127.0.0.1:7000")))
       Thread.sleep(10000)   // Wait for cluster setup
       env.start()
       success
@@ -125,7 +128,7 @@ class ConcurrentUsageSpec extends Specification with Tags {
 
     "Let user do some stuff" in {
 
-      def scenario: Unit = {
+      def scenario(client: NodeClient): Unit = {
         for (i <- 0 to 100) {
           var seq = Seq[String]()
           for (j <- 0 to 100) {
@@ -142,8 +145,8 @@ class ConcurrentUsageSpec extends Specification with Tags {
         }
       }
       var list = List[Future[Unit]]()
-      for (i <- 0 to nbrClients) {
-        list = list :+ Future(scenario)(userEc)
+      clients.foreach { client =>
+        list = list :+ Future(scenario(client))(userEc)
       }
       val fu = Future.sequence(list)
       Await.result(fu, Duration(600, TimeUnit.SECONDS))
@@ -152,7 +155,7 @@ class ConcurrentUsageSpec extends Specification with Tags {
 
     "Stop the nodes" in {
       nodes.foreach(_.displayStats().stop().destroy())
-      client.stop()
+      clients.foreach(_.stop())
       Thread.sleep(2000)
       env.stop()
       success

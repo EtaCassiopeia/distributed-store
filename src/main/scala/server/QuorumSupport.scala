@@ -65,8 +65,8 @@ trait QuorumSupport { self: KeyValNode =>
                 // Transaction rollback here, tell every nodes to rollback to it's previous state
                 val fail = OpStatus(false, first.key, None, first.timestamp, first.operationId)
                 op match {
-                  case DeleteOperation(_, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.mapService) ! Rollback(status.ops))
-                  case SetOperation(_, _, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.mapService) ! Rollback(status.ops))
+                  case DeleteOperation(_, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.rollbackService) ! Rollback(status.ops))
+                  case SetOperation(_, _, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.rollbackService) ! Rollback(status.ops))
                   case _ =>
                 }
                 fail

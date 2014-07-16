@@ -27,6 +27,8 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   Logger.configure()
 
+  private[server] def locked(key: String) = db.locked(key)
+
   private[server] def lock(key: String) = db.lock(key)
 
   private[server] def unlock(key: String) = db.unlock(key)
@@ -48,8 +50,9 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     system             <== ActorSystem(Env.systemName, clusterConfig.config)
     cluster            <== Cluster(system())
 
-    system().actorOf(Props(classOf[NodeService], this), Env.mapService)
-    system().actorOf(Props(classOf[NodeClusterWatcher], this), Env.mapWatcher)
+    if (!clientOnly) system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+    if (!clientOnly) system().actorOf(Props(classOf[RollbackService], this), Env.rollbackService)
+    if (!clientOnly) system().actorOf(Props(classOf[NodeClusterWatcher], this), Env.mapWatcher)
 
     clusterConfig.join(cluster(), seedNodes)
 
