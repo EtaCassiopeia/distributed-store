@@ -17,13 +17,23 @@ import scala.util.{Failure, Success, Try}
 
 class OnDiskStore(val name: String, val config: Configuration, val path: File, val metricsenv: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean) {
 
+  val commitLog = new File(path, "commits.log")
+
+  if (!path.exists()) path.mkdirs()
+  if (!commitLog.exists()) commitLog.createNewFile()
+
   val options = new Options()
-  val db = Iq80DBFactory.factory.open(path, options)
+  val db = Iq80DBFactory.factory.open(new File(path, "leveldb"), options)
   val cache = new ConcurrentHashMap[String, JsValue]()
   val cacheSetCount = new AtomicInteger(0)
   private[this] val locks = new ConcurrentHashMap[String, Unit]()
 
   options.createIfMissing(true)
+
+  def restore() = {
+    // TODO : restore from commit log
+    // TODO : populate key cache
+  }
 
   def locked(key: String) = {
     locks.containsKey(key)
@@ -43,7 +53,13 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
 
   def forceSync() = syncCacheIfNecessary(true)
 
-  def destroy(): Unit = Iq80DBFactory.factory.destroy(path, options)
+  def destroy(): Unit = {
+    Iq80DBFactory.factory.destroy(path, options)
+    commitLog.delete()
+    commitLog.deleteOnExit()
+    path.delete()
+    path.deleteOnExit()
+  }
 
   private def setLevelDB(op: SetOperation): OpStatus = {
     Try { db.put(Iq80DBFactory.bytes(op.key), Iq80DBFactory.bytes(Json.stringify(op.value))) } match {
