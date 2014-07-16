@@ -2,8 +2,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{Executors, TimeUnit}
 
 import common.IdGenerator
+import config.ClusterEnv
 import play.api.libs.json.Json
-import server.{ClusterEnv, KeyValNode, NodeClient}
+import server.{KeyValNode, NodeClient}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}

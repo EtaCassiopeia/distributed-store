@@ -1,24 +1,15 @@
-package server
+package metrics
 
 import java.net.InetSocketAddress
 import java.nio.charset.Charset
-import java.util.concurrent.{Future, Executors, TimeUnit}
+import java.util.concurrent.{Executors, TimeUnit}
 
-import com.codahale.metrics.{JmxReporter, ConsoleReporter, MetricRegistry}
-import com.librato.metrics.HttpPoster.Response
-import com.librato.metrics.{NingHttpPoster, HttpPoster, LibratoReporter}
+import com.codahale.metrics.{JmxReporter, MetricRegistry}
 import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
-import common.{IdGenerator, Reference}
-import config.Env
-import jmx.JMXMonitor
+import common.Reference
 import play.api.libs.json.Json
 
-object ClusterEnv {
-  def apply(replicates: Int) = new ClusterEnv(replicates, (replicates / 2) + 1, (replicates / 2) + 1)
-  def apply(replicates: Int, quorumRead: Int, quorumWrite: Int) = new ClusterEnv(replicates, quorumRead, quorumWrite)
-}
-
-class ClusterEnv(val replicates: Int, val quorumRead: Int, val quorumWrite: Int) {
+class Metrics {
 
   private[this] val metrics = new MetricRegistry
   private[this] val commandsTimerClient = metrics.timer("operations.client")
@@ -82,6 +73,9 @@ class ClusterEnv(val replicates: Int, val quorumRead: Int, val quorumWrite: Int)
       }
     })
     server().start()
+    Runtime.getRuntime.addShutdownHook(new Thread(new Runnable() {
+      override def run(): Unit = stop()
+    }))
   }
 
   def stop() = {

@@ -1,4 +1,4 @@
-package jmx
+package metrics
 
 import java.lang.management.ManagementFactory
 import javax.management.ObjectName

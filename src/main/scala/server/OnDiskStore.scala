@@ -6,7 +6,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import com.codahale.metrics.Timer.Context
 import common.{Configuration, Logger}
-import config.Env
+import config.{ClusterEnv, Env}
+import metrics.Metrics
 import org.iq80.leveldb.Options
 import org.iq80.leveldb.impl.Iq80DBFactory
 import play.api.libs.json.{JsObject, JsValue, Json}
@@ -14,7 +15,7 @@ import play.api.libs.json.{JsObject, JsValue, Json}
 import scala.collection.JavaConversions._
 import scala.util.{Failure, Success, Try}
 
-class OnDiskStore(val name: String, val config: Configuration, val path: File, val env: ClusterEnv, val clientOnly: Boolean) {
+class OnDiskStore(val name: String, val config: Configuration, val path: File, val metricsenv: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean) {
 
   val options = new Options()
   val db = Iq80DBFactory.factory.open(path, options)
@@ -53,10 +54,10 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
 
   private def awaitForUnlock(key: String, perform: => OpStatus, failStatus: OpStatus, ctx: Context, ctx2: Context): OpStatus = {
     if (locked(key)) {
-      env.lock
+      metrics.lock
       var attempts = 0
       while(locks.containsKey(key) || attempts > 50) {
-        env.lockRetry
+        metrics.lockRetry
         attempts = attempts + 1
         Thread.sleep(1)
       }
@@ -72,7 +73,7 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   private def syncCacheIfNecessary(force: Boolean): Unit = {
     if (!clientOnly)
       if (cacheSetCount.compareAndSet(Env.syncEvery, -1)) {
-        val ctx = env.cacheSync
+        val ctx = metrics.cacheSync
         Logger.trace(s"[$name] Sync cache with LevelDB ...")
         val batch = db.createWriteBatch()
         try {
@@ -88,7 +89,7 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
           ctx.close()
         }
       } else if (force) {
-        val ctx = env.cacheSync
+        val ctx = metrics.cacheSync
         cacheSetCount.set(0)
         Logger.info(s"[$name] Sync cache with LevelDB ...")
         val batch = db.createWriteBatch()
@@ -108,8 +109,8 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   }
 
   def setOperation(op: SetOperation, rollback: Boolean = false): OpStatus = {
-    val ctx = env.startCommandIn
-    val ctx2 = env.write
+    val ctx = metrics.startCommandIn
+    val ctx2 = metrics.write
     def perform = {
       syncCacheIfNecessary(false)
       //lock(op.key)
@@ -125,8 +126,8 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   }
 
   def deleteOperation(op: DeleteOperation, rollback: Boolean = false): OpStatus = {
-    val ctx = env.startCommandIn
-    val ctx2 = env.delete
+    val ctx = metrics.startCommandIn
+    val ctx2 = metrics.delete
     def perform = {
       syncCacheIfNecessary(false)
       //lock(op.key)
@@ -150,8 +151,8 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   }
 
   def getOperation(op: GetOperation, rollback: Boolean = false): OpStatus = {
-    val ctx = env.startCommandIn
-    val ctx2 = env.read
+    val ctx = metrics.startCommandIn
+    val ctx2 = metrics.read
     def perform = {
       syncCacheIfNecessary(false)
       //lock(op.key)

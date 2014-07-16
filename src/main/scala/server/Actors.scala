@@ -26,17 +26,17 @@ class NodeServiceWorker(id: String, node: KeyValNode) extends Actor {
     case o @ GetOperation(key, t, id, start) => {
       performRollback()
       sender() ! node.db.getOperation(o)
-      node.env.endAwait(start)
+      node.metrics.endAwait(start)
     }
     case o @  SetOperation(key, value, t, id, start) => {
       performRollback()
       sender() ! node.db.setOperation(o)
-      node.env.endAwait(start)
+      node.metrics.endAwait(start)
     }
     case o @ DeleteOperation(key, t, id, start) => {
       performRollback()
       sender() ! node.db.deleteOperation(o)
-      node.env.endAwait(start)
+      node.metrics.endAwait(start)
     }
     case o @ RollbackPusher(_) => performRollback()
     case _ =>
@@ -74,7 +74,7 @@ object RollbackService {
 class RollbackService(node: KeyValNode) extends Actor {
   override def receive: Actor.Receive = {
     case r @ Rollback(status) => {
-      val ctx = node.env.rollback
+      val ctx = node.metrics.rollback
       def performRollback() = {
         node.lock(status.key)
         // Rollback management : here be dragons

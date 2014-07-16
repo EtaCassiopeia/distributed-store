@@ -3,8 +3,9 @@ import java.util.concurrent.{TimeUnit, Executors}
 
 import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
 import common.IdGenerator
+import config.ClusterEnv
 import play.api.libs.json.Json
-import server.{NodeClient, ClusterEnv, KeyValNode}
+import server.{NodeClient, KeyValNode}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, Await, ExecutionContext}

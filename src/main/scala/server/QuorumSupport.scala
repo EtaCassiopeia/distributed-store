@@ -24,7 +24,7 @@ trait QuorumSupport { self: KeyValNode =>
     val address = cluster().selfAddress
     val selection = actorSys.actorSelection(s"/user/${Env.mapService}")
     def actualOperation(): Future[OpStatus] = {
-      val ctx1 = env.startQuorumAggr
+      val ctx1 = metrics.startQuorumAggr
       targets.map { member =>
         //Try {
           if (member.address == address) {
@@ -43,7 +43,7 @@ trait QuorumSupport { self: KeyValNode =>
       }.asFuture.andThen {
         case _ => ctx1.close()
       }.map { lll =>
-        val ctx2 = env.startQuorum
+        val ctx2 = metrics.startQuorum
         val fuStatuses = lll.map(_.ops)
         val successfulStatuses = fuStatuses.toList.filter(_.successful).sortWith {(r1, r2) => r1.value.isDefined }
         if (successfulStatuses.size < quorumNbr) {
@@ -81,15 +81,15 @@ trait QuorumSupport { self: KeyValNode =>
           ops
         }
       }.andThen {
-        case Success(OpStatus(false, _, _, _, _, _)) => env.quorumFailure
-        case Failure(_) => env.quorumFailure
+        case Success(OpStatus(false, _, _, _, _, _)) => metrics.quorumFailure
+        case Failure(_) => metrics.quorumFailure
         case Success(OpStatus(true, _, _, _, _, _)) =>
       }
     }
     Futures.retryWithPredicate[OpStatus](10, _.successful)(actualOperation()).andThen {
-      case Success(OpStatus(false, _, _, _, _, _)) => env.quorumRetryFailure
-      case Success(OpStatus(true, _, _, _, _, _)) => env.quorumSuccess
-      case Failure(_) => env.quorumRetryFailure
+      case Success(OpStatus(false, _, _, _, _, _)) => metrics.quorumRetryFailure
+      case Success(OpStatus(true, _, _, _, _, _)) => metrics.quorumSuccess
+      case Failure(_) => metrics.quorumRetryFailure
     }
   }
 }

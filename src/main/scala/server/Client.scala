@@ -4,11 +4,13 @@ import java.io.File
 
 import com.typesafe.config.ConfigFactory
 import common.{Configuration, IdGenerator}
+import config.ClusterEnv
+import metrics.Metrics
 import play.api.libs.json.JsValue
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class NodeClient(env: ClusterEnv, node: KeyValNode)  {
+class NodeClient(env: Metrics, node: KeyValNode)  {
 
   def start(seedNodes: Seq[String])(implicit ec: ExecutionContext): NodeClient = {
     node.start(seedNodes = seedNodes)(ec)
@@ -58,5 +60,5 @@ class NodeClient(env: ClusterEnv, node: KeyValNode)  {
 }
 
 object NodeClient {
-  def apply(env: ClusterEnv) = new NodeClient(env, new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, true))
+  def apply(env: ClusterEnv) = new NodeClient(env.metrics, new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, env.metrics, true))
 }

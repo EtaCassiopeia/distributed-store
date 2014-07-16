@@ -1,9 +1,10 @@
 import java.util.concurrent.{Executors, TimeUnit}
 
 import common.IdGenerator
+import config.ClusterEnv
 import org.specs2.mutable.{Specification, Tags}
 import play.api.libs.json.Json
-import server.{ClusterEnv, KeyValNode, NodeClient}
+import server.{KeyValNode, NodeClient}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext}

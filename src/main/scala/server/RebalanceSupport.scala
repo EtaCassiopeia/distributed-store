@@ -31,7 +31,7 @@ trait RebalanceSupport { self: KeyValNode =>
 
   private[server] def blockingRebalance(): Unit = {
     if (running.get() && !clientOnly) {
-      val ctx = env.balance
+      val ctx = metrics.balance
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
       val nodes = numberOfNodes()
@@ -57,7 +57,7 @@ trait RebalanceSupport { self: KeyValNode =>
           rebalanced.incrementAndGet()
         }
       }
-      env.balanceKeys(rebalanced.get())
+      metrics.balanceKeys(rebalanced.get())
       Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
       ctx.close()
     }

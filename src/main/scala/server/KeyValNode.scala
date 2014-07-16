@@ -9,16 +9,17 @@ import akka.actor._
 import akka.cluster.Cluster
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
-import config.Env
+import config.{ClusterEnv, Env}
+import metrics.Metrics
 import org.iq80.leveldb.impl.Iq80DBFactory
 import play.api.libs.json.{JsValue, Json}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Random, Try}
 
-class KeyValNode(val name: String, val config: Configuration, val path: File, val env: ClusterEnv, val clientOnly: Boolean = false) extends ClusterSupport with QuorumSupport with RebalanceSupport {
+class KeyValNode(val name: String, val config: Configuration, val path: File, val env: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean = false) extends ClusterSupport with QuorumSupport with RebalanceSupport {
 
-  private[server] val db = new OnDiskStore(name, config, path, env, clientOnly)
+  private[server] val db = new OnDiskStore(name, config, path, env, metrics, clientOnly)
   private[server] val system = Reference.empty[ActorSystem]()
   private[server] val cluster = Reference.empty[Cluster]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
@@ -82,7 +83,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   // Client API
   private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val ctx = env.startCommand
+    val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
@@ -94,7 +95,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val ctx = env.startCommand
+    val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
@@ -106,7 +107,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   private[server] def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val ctx = env.startCommand
+    val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
@@ -118,7 +119,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
-    val ctx = env.startCommand
+    val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
@@ -130,7 +131,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   private[server] def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
-    val ctx = env.startCommand
+    val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
@@ -148,9 +149,9 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 }
 
 object KeyValNode {
-  def apply(env: ClusterEnv) = new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env)
-  def apply(name: String, env: ClusterEnv) = new KeyValNode(name, new Configuration(ConfigFactory.load()), new File(name), env)
-  def apply(name: String, env: ClusterEnv, path: File) = new KeyValNode(name, new Configuration(ConfigFactory.load()), path, env)
-  def apply(name: String, env: ClusterEnv, config: Configuration, path: File) = new KeyValNode(name, config, path, env)
-  def apply(name: String, env: ClusterEnv, config: Config, path: File) = new KeyValNode(name, new Configuration(config), path, env)
+  def apply(env: ClusterEnv) = new KeyValNode(IdGenerator.uuid, new Configuration(ConfigFactory.load()), new File(IdGenerator.uuid), env, env.metrics)
+  def apply(name: String, env: ClusterEnv) = new KeyValNode(name, new Configuration(ConfigFactory.load()), new File(name), env, env.metrics)
+  def apply(name: String, env: ClusterEnv, path: File) = new KeyValNode(name, new Configuration(ConfigFactory.load()), path, env, env.metrics)
+  def apply(name: String, env: ClusterEnv, config: Configuration, path: File) = new KeyValNode(name, config, path, env, env.metrics)
+  def apply(name: String, env: ClusterEnv, config: Config, path: File) = new KeyValNode(name, new Configuration(config), path, env, env.metrics)
 }
