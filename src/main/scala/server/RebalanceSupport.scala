@@ -35,7 +35,7 @@ trait RebalanceSupport { self: KeyValNode =>
       implicit val ec = system().dispatcher
       val start = System.currentTimeMillis()
       val nodes = numberOfNodes()
-      val keys = db.keys()
+      val keys = List[String]() // TODO : fix here for rebalance db.keys()
       val rebalanced = new AtomicInteger(0)
       val selfAddress = cluster().selfAddress
       val filtered = keys.filter { key =>
@@ -43,22 +43,23 @@ trait RebalanceSupport { self: KeyValNode =>
         !t.contains(selfAddress)
         //!t.address.toString.contains(selfAddress.toString)
       }
+      // TODO : fix rebalance
       Logger.debug(s"[$name] Rebalancing $nodes nodes, found ${keys.size} keys, should move ${filtered.size} keys")
-      filtered.map { key =>
-        db.getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.map { doc =>
-          db.deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
-          val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
-          futureSet.onComplete {
-            case Success(opStatus) => //counterRebalancedKey.incrementAndGet()
-            case Failure(e) => {
-              db.setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
-              rebalance()
-            }
-          }
-          Await.result(futureSet, Env.waitForRebalanceKey)
-          rebalanced.incrementAndGet()
-        }
-      }
+      //filtered.map { key =>
+      //  db.getOperation(GetOperation(key, System.currentTimeMillis(), generator.nextId())).value.map { doc =>
+      //    db.deleteOperation(DeleteOperation(key, System.currentTimeMillis(), generator.nextId()))
+      //    val futureSet = Futures.retry(Env.rebalanceRetry)(set(key, doc))
+      //    futureSet.onComplete {
+      //      case Success(opStatus) => //counterRebalancedKey.incrementAndGet()
+      //      case Failure(e) => {
+      //        db.setOperation(SetOperation(key, doc, System.currentTimeMillis(), generator.nextId()))
+      //        rebalance()
+      //      }
+      //    }
+      //    Await.result(futureSet, Env.waitForRebalanceKey)
+      //    rebalanced.incrementAndGet()
+      //  }
+      //}
       metrics.balanceKeys(rebalanced.get())
       Logger.debug(s"[$name] Rebalancing $nodes nodes done, ${rebalanced.get()} key moved in ${System.currentTimeMillis() - start} ms.")
       ctx.close()

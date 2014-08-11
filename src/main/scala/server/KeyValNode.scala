@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.actor._
 import akka.cluster.Cluster
+import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.{Config, ConfigFactory}
 import common._
 import config.{ClusterEnv, Env}
@@ -19,20 +20,23 @@ import scala.util.{Random, Try}
 
 class KeyValNode(val name: String, val config: Configuration, val path: File, val env: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean = false) extends ClusterSupport with QuorumSupport with RebalanceSupport {
 
-  private[server] val db = new OnDiskStore(name, config, path, env, metrics, clientOnly)
   private[server] val system = Reference.empty[ActorSystem]()
   private[server] val cluster = Reference.empty[Cluster]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
 
+  private[server] val dbs = for (i <- 0 to Env.cells) yield new OnDiskStore(s"$name-cell-$i", config, new File(path, s"cell-$i"), env, metrics, clientOnly)
   private[server] val running = new AtomicBoolean(false)
 
   Logger.configure()
 
-  private[server] def locked(key: String) = db.locked(key)
 
-  private[server] def lock(key: String) = db.lock(key)
+  private[server] def lock(key: String) = {
+    NodeCell.cellDb(key, this).lock(key)
+  }
 
-  private[server] def unlock(key: String) = db.unlock(key)
+  private[server] def unlock(key: String) = {
+    NodeCell.cellDb(key, this).unlock(key)
+  }
 
   private[server] def syncNode(ec: ExecutionContext): Unit = {
     Try {
@@ -51,7 +55,11 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     system             <== ActorSystem(Env.systemName, clusterConfig.config)
     cluster            <== Cluster(system())
 
-    if (!clientOnly) system().actorOf(Props(classOf[NodeService], this), Env.mapService)
+    if (!clientOnly) {
+      for (i <- 0 to Env.cells) {
+        system().actorOf(Props(classOf[NodeCell], s"node-cell-$i", dbs(i), metrics), s"node-cell-$i")
+      }
+    }
     if (!clientOnly) system().actorOf(Props(classOf[RollbackService], this), Env.rollbackService)
     if (!clientOnly) system().actorOf(Props(classOf[NodeClusterWatcher], this), Env.mapWatcher)
 
@@ -61,7 +69,6 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
     Runtime.getRuntime.addShutdownHook(new Thread(new Runnable() {
       override def run(): Unit = {
-        db.forceSync()
         stop()
       }
     }))
@@ -69,16 +76,24 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   def stop(): KeyValNode = {
-    db.forceSync()
+    for (i <- 0 to Env.cells) {
+      system().actorSelection(s"/user/node-cell-$i") ! DbForceSync()
+    }
     running.set(false)
     cluster().leave(cluster().selfAddress)
     system().shutdown()
-    if (!clientOnly) db.close()
+    if (!clientOnly) {
+      for (i <- 0 to Env.cells) {
+        system().actorSelection(s"/user/node-cell-$i") ! DbClose()
+      }
+    }
     this
   }
 
   def destroy(): Unit = {
-    db.destroy()
+    for (i <- 0 to Env.cells) {
+      system().actorSelection(s"/user/node-cell-$i") ! DbDestroy()
+    }
   }
 
   // Client API
@@ -143,7 +158,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   def displayStats(): KeyValNode = {
-    Logger.info(Json.prettyPrint(db.stats()))
+    //Logger.info(Json.prettyPrint(db.stats()))
     this
   }
 }

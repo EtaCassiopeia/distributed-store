@@ -2,21 +2,39 @@ package server
 
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor._
 import com.google.common.hash.{HashCode, Hashing}
 import config.Env
+import metrics.Metrics
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Promise}
 import scala.util.Try
 
+object NodeCell {
+  def cellIdx(key: String) = {
+    Hashing.consistentHash(HashCode.fromInt(key.hashCode), Env.cells)
+  }
 
-class NodeServiceWorker(id: String, node: KeyValNode) extends Actor {
+  def cellDb(key: String, node: KeyValNode) = {
+    val id = cellIdx(key)
+    node.dbs(id)
+  }
+
+  def cellName(key: String): String = {
+    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), Env.cells)
+    s"/user/cell-node-$id"
+  }
+
+  def cellName(key: String, system: ActorSystem): ActorSelection = system.actorSelection(cellName(key))
+}
+
+class NodeCell(name: String, db: OnDiskStore, metrics: Metrics) extends Actor {
 
   def performRollback() = {
-    if (RollbackService.pendingRollback.containsKey(id)) {
-      val roll = RollbackService.pendingRollback.get(id)
-      RollbackService.pendingRollback.remove(id)
+    if (RollbackService.pendingRollback.containsKey(name)) {
+      val roll = RollbackService.pendingRollback.get(name)
+      RollbackService.pendingRollback.remove(name)
       roll.block()
       roll.trigger.success(())
     }
@@ -25,47 +43,28 @@ class NodeServiceWorker(id: String, node: KeyValNode) extends Actor {
   override def receive: Receive = {
     case o @ GetOperation(key, t, id, start) => {
       performRollback()
-      sender() ! node.db.getOperation(o)
-      node.metrics.endAwait(start)
+      sender() ! db.getOperation(o)
+      metrics.endAwait(start)
     }
     case o @  SetOperation(key, value, t, id, start) => {
       performRollback()
-      sender() ! node.db.setOperation(o)
-      node.metrics.endAwait(start)
+      sender() ! db.setOperation(o)
+      metrics.endAwait(start)
     }
     case o @ DeleteOperation(key, t, id, start) => {
       performRollback()
-      sender() ! node.db.deleteOperation(o)
-      node.metrics.endAwait(start)
+      sender() ! db.deleteOperation(o)
+      metrics.endAwait(start)
     }
-    case o @ RollbackPusher(_) => performRollback()
+    case RollbackPusher(_) => performRollback()
+    case DbForceSync() => db.forceSync()
+    case DbClose() => db.close()
+    case DbDestroy() => db.destroy()
     case _ =>
   }
 }
 
-class NodeService(node: KeyValNode) extends Actor {
-  var workers = List[ActorRef]()
-  override def preStart(): Unit = {
-    for(i <- 0 to Env.workers) {
-      workers = workers :+ context.system.actorOf(Props(classOf[NodeServiceWorker], s"${i}", node))
-    }
-  }
-  def worker(key: String) = {
-    val id = Hashing.consistentHash(HashCode.fromInt(key.hashCode), Env.workers)
-    workers(id % Env.workers)
-  }
-  override def receive: Receive = {
-    case o @ GetOperation(key, _, _, _) => worker(key) forward o
-    case o @ SetOperation(key, _, _, _, _) => worker(key) forward o
-    case o @ DeleteOperation(key, _, _, _) => worker(key) forward o
-    case o @ RollbackPusher(key) => worker(key) forward o
-    case SyncCacheAndBalance() => {
-      node.db.forceSync()
-      node.rebalance()
-    }
-    case _ =>
-  }
-}
+//
 
 object RollbackService {
   val pendingRollback = new ConcurrentHashMap[String, RollbackOperation]()
@@ -77,18 +76,20 @@ class RollbackService(node: KeyValNode) extends Actor {
       val ctx = node.metrics.rollback
       def performRollback() = {
         node.lock(status.key)
+        val db = NodeCell.cellDb(status.key, node)
         // Rollback management : here be dragons
+        // TODO : find a more actor-ish way
         // Todo : use timestamp to check if rollback
-        val opt = node.db.getOperation(GetOperation(status.key, 0L, 0L)).value
-        if (opt.isDefined && status.old.isEmpty) node.db.deleteOperation(DeleteOperation(status.key, 0L, 0L))
-        else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) node.db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
-        else if (opt.isEmpty && status.old.isDefined) node.db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+        val opt = db.getOperation(GetOperation(status.key, 0L, 0L)).value
+        if (opt.isDefined && status.old.isEmpty) db.deleteOperation(DeleteOperation(status.key, 0L, 0L))
+        else if (opt.isDefined && status.old.isDefined && opt.get == status.value.get) db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
+        else if (opt.isEmpty && status.old.isDefined) db.setOperation(SetOperation(status.key, status.old.get, 0L, 0L))
         node.unlock(status.key)
         ctx.close()
       }
       val promise = Promise[Unit]()
       RollbackService.pendingRollback.put(status.key, RollbackOperation(promise, performRollback))
-      node.system().actorSelection(s"/user/${Env.mapService}") ! RollbackPusher(status.key)
+      NodeCell.cellName(status.key, node.system()) ! RollbackPusher(status.key)
       Try { Await.result(promise.future, Duration(1, TimeUnit.MINUTES)) }
     }
     case _ =>

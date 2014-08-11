@@ -55,6 +55,7 @@ class LoadSpec extends Specification with Tags {
       node8.start(seedNodes = Seq("127.0.0.1:7000"))
       node9.start(seedNodes = Seq("127.0.0.1:7000"))
       client.start(seedNodes = Seq("127.0.0.1:7000"))
+      env.start()
       Thread.sleep(6000)   // Wait for cluster setup
       success
     }
@@ -80,6 +81,7 @@ class LoadSpec extends Specification with Tags {
       node8.displayStats().stop().destroy()
       node9.displayStats().stop().destroy()
       client.stop()
+      env.stop()
       success
     }
   }

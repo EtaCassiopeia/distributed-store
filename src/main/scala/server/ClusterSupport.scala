@@ -16,6 +16,7 @@ class NodeClusterWatcher(node: KeyValNode) extends Actor {
   }
   override def receive: Receive = {
     case MemberUp(member) => {
+      Logger.info(s"New member ${member.getRoles} is up at ${member.address.toString}")
       node.rebalance()
     }
     case UnreachableMember(member) => {

@@ -10,12 +10,13 @@ import scala.concurrent.duration.Duration
 object Env {
   val nodeRole = "DISTRIBUTED-MAP-NODE"
   val clientRole = "DISTRIBUTED-MAP-NODE-CLIENT"
-  val mapService = "DISTRIBUTED-MAP-SERVICE"
+  //val mapService = "DISTRIBUTED-MAP-SERVICE"
   val rollbackService = "DISTRIBUTED-MAP-ROLLBACK-SERVICE"
   val mapWatcher = "DISTRIBUTED-MAP-CLUSTER-WATCHER"
   val systemName = "distributed-map"
   val syncEvery = 2000                                        // TODO : from file
-  val workers = 100                                          // TODO : from file
+  //val workers = 100                                          // TODO : from file
+  val cells = 10
   val UTF8 = Charset.forName("UTF-8")
   val autoResync = Duration(20, TimeUnit.MINUTES)            // TODO : from file
   val waitForCluster = Duration(5, TimeUnit.SECONDS)        // TODO : from file

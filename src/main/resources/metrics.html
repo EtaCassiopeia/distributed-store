@@ -191,7 +191,7 @@
                     $('.container-fluid').append('<div id="metrics-' + name + '" class="metrics col-md-4 ' + '"></div>');
                     $('#metrics-' + name).append('<h3>' + name + '</h3>');
                     _.each(mbean, function(value, index) {
-                        if (index !== 'name' && index !== 'RateUnit' && index != 'DurationUnit') {
+                        if (index !== 'name' && index !== 'RateUnit' && index !== 'DurationUnit' && index !== '_id' && index !== '@timestamp') {
                             var unit = ' hits';
                             if (index.indexOf('Rate') > 0) {
                                 unit = ' event/sec.';

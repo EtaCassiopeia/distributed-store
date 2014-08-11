@@ -19,4 +19,7 @@ case class SyncCacheAndBalance()
 case class Rollback(status: OpStatus)
 case class RollbackOperation(trigger: Promise[Unit], block: () => Unit)
 case class RollbackPusher(key: String)
+case class DbClose()
+case class DbDestroy()
+case class DbForceSync()
 

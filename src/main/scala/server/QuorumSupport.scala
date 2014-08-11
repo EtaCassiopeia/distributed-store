@@ -22,7 +22,7 @@ trait QuorumSupport { self: KeyValNode =>
     }
     val actorSys = system()
     val address = cluster().selfAddress
-    val selection = actorSys.actorSelection(s"/user/${Env.mapService}")
+    val selection = NodeCell.cellName(op.key, actorSys) //actorSys.actorSelection(s"/user/${Env.mapService}")
     def actualOperation(): Future[OpStatus] = {
       val ctx1 = metrics.startQuorumAggr
       targets.map { member =>
@@ -31,7 +31,7 @@ trait QuorumSupport { self: KeyValNode =>
             case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
         } else {
-          actorSys.actorSelection(RootActorPath(member.address) / "user" / Env.mapService).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+          actorSys.actorSelection(RootActorPath(member.address) / "user" / s"node-cell-${NodeCell.cellIdx(op.key)}").ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
             case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
         }

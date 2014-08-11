@@ -48,6 +48,7 @@ class Load2Spec extends Specification with Tags {
       node4.start(seedNodes = Seq("127.0.0.1:7000"))
       node5.start(seedNodes = Seq("127.0.0.1:7000"))
       client.start(seedNodes = Seq("127.0.0.1:7000"))
+      env.start()
       Thread.sleep(10000)   // Wait for cluster setup
       success
     }
@@ -83,6 +84,7 @@ class Load2Spec extends Specification with Tags {
       node4.displayStats().stop().destroy()
       node5.displayStats().stop().destroy()
       client.stop()
+      env.stop()
       success
     }
   }
