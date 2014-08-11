@@ -18,7 +18,7 @@ import scala.util.Try
 
 class Metrics {
 
-  private[this] val metrics = new MetricRegistry
+  val metrics = new MetricRegistry
   private[this] val commandsTimerClient = metrics.timer("operations.client")
   private[this] val commandsAwaitTimer = metrics.timer("operations.await")
   private[this] val commandsTimerOut = metrics.timer("operations.out")

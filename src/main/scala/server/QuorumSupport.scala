@@ -31,7 +31,7 @@ trait QuorumSupport { self: KeyValNode =>
             case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
         } else {
-          actorSys.actorSelection(RootActorPath(member.address) / "user" / s"node-cell-${NodeCell.cellIdx(op.key)}").ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
+          actorSys.actorSelection(RootActorPath(member.address) / "user" / NodeCell.cellName(op.key)).ask(op)(Env.longTimeout).mapTo[OpStatus].map(LocalizedStatus(_, member)).recover {
             case _ => LocalizedStatus(OpStatus(false, "", None, System.currentTimeMillis(), 0L), member)
           }
         }
@@ -59,9 +59,17 @@ trait QuorumSupport { self: KeyValNode =>
                 Logger.trace(fuStatuses.toString())
                 // Transaction rollback here, tell every nodes to rollback to it's previous state
                 val fail = OpStatus(false, first.key, None, first.timestamp, first.operationId)
+                def performRollback(status: LocalizedStatus) = {
+                  if (status.member.address == address) {
+                    selection ! Rollback(status.ops)
+                  } else {
+                    actorSys.actorSelection(RootActorPath(status.member.address) / "user" / NodeCell.cellName(status.ops.key))
+                  }
+                }
                 op match {
-                  case DeleteOperation(_, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.rollbackService) ! Rollback(status.ops))
-                  case SetOperation(_, _, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.rollbackService) ! Rollback(status.ops))
+                  //case DeleteOperation(_, _, _, _) => lll.foreach( status => system().actorSelection(RootActorPath(status.member.address) / "user" / Env.rollbackService) ! Rollback(status.ops))
+                  case DeleteOperation(_, _, _, _) => lll.foreach(performRollback)
+                  case SetOperation(_, _, _, _, _) => lll.foreach(performRollback)
                   case _ =>
                 }
                 fail

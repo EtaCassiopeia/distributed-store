@@ -11,7 +11,7 @@ object Env {
   val nodeRole = "DISTRIBUTED-MAP-NODE"
   val clientRole = "DISTRIBUTED-MAP-NODE-CLIENT"
   //val mapService = "DISTRIBUTED-MAP-SERVICE"
-  val rollbackService = "DISTRIBUTED-MAP-ROLLBACK-SERVICE"
+  //val rollbackService = "DISTRIBUTED-MAP-ROLLBACK-SERVICE"
   val mapWatcher = "DISTRIBUTED-MAP-CLUSTER-WATCHER"
   val systemName = "distributed-map"
   val syncEvery = 2000                                        // TODO : from file

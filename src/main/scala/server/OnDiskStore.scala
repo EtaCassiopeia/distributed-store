@@ -21,8 +21,8 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
 
   private[this] val commitLog = new File(path, "commit.log")
 
-  if (!path.exists()) path.mkdirs()
-  if (!commitLog.exists()) commitLog.createNewFile()
+  if (!clientOnly && !path.exists()) path.mkdirs()
+  if (!clientOnly && !commitLog.exists()) commitLog.createNewFile()
 
   private[this] val options = new Options()
   private[this] val db = Iq80DBFactory.factory.open(new File(path, "leveldb"), options)

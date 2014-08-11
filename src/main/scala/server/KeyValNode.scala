@@ -24,7 +24,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   private[server] val cluster = Reference.empty[Cluster]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
 
-  private[server] val dbs = for (i <- 0 to Env.cells) yield new OnDiskStore(s"$name-cell-$i", config, new File(path, s"cell-$i"), env, metrics, clientOnly)
+  private[server] val dbs = if (clientOnly) List[OnDiskStore]() else for (i <- 0 to Env.cells) yield new OnDiskStore(s"$name-cell-$i", config, new File(path, s"cell-$i"), env, metrics, clientOnly)
   private[server] val running = new AtomicBoolean(false)
 
   Logger.configure()
@@ -57,10 +57,9 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
     if (!clientOnly) {
       for (i <- 0 to Env.cells) {
-        system().actorOf(Props(classOf[NodeCell], s"node-cell-$i", dbs(i), metrics), s"node-cell-$i")
+        system().actorOf(Props(classOf[NodeCell], NodeCell.formattedName(i), dbs(i), metrics).withMailbox("map-config.akka.cell-prio-mailbox"), NodeCell.formattedName(i))
       }
     }
-    if (!clientOnly) system().actorOf(Props(classOf[RollbackService], this), Env.rollbackService)
     if (!clientOnly) system().actorOf(Props(classOf[NodeClusterWatcher], this), Env.mapWatcher)
 
     clusterConfig.join(cluster(), seedNodes)
@@ -77,14 +76,14 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   def stop(): KeyValNode = {
     for (i <- 0 to Env.cells) {
-      system().actorSelection(s"/user/node-cell-$i") ! DbForceSync()
+      system().actorSelection(NodeCell.formattedPath(i)) ! DbForceSync()
     }
     running.set(false)
     cluster().leave(cluster().selfAddress)
     system().shutdown()
     if (!clientOnly) {
       for (i <- 0 to Env.cells) {
-        system().actorSelection(s"/user/node-cell-$i") ! DbClose()
+        system().actorSelection(NodeCell.formattedPath(i)) ! DbClose()
       }
     }
     this
@@ -92,7 +91,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
 
   def destroy(): Unit = {
     for (i <- 0 to Env.cells) {
-      system().actorSelection(s"/user/node-cell-$i") ! DbDestroy()
+      system().actorSelection(NodeCell.formattedPath(i)) ! DbDestroy()
     }
   }
 
