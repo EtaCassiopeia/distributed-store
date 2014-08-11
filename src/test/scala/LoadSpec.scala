@@ -171,6 +171,8 @@ class Load2Spec extends Specification with Tags {
 class Load3Spec extends Specification with Tags {
   sequential
 
+  val nodeAmount = 10
+  val replication = 4
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
 
@@ -195,8 +197,8 @@ class Load3Spec extends Specification with Tags {
 
   "Distributed Map" should {
 
-    val env = ClusterEnv(3)
-    val nodes = for (i <- 0 to 10) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
+    val env = ClusterEnv(replication)
+    val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
 
     "Start some nodes" in {
       nodes.head.start("127.0.0.1", 7000)

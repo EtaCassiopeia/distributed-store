@@ -1,4 +1,5 @@
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{TimeUnit, Executors}
 
 import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
@@ -123,4 +124,52 @@ object EC2Client extends App {
   env.stop()
   client.stop()
 
+}
+
+object EC2BareMetal extends App {
+
+  val nodeAmount = 10
+  val replication = 4
+  val timeout = Duration(10, TimeUnit.SECONDS)
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
+
+  def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[_]): Unit = {
+    val start = System.currentTimeMillis()
+    val future = Future.sequence(
+      (0 to many).toList.map { _ =>
+        val client = NodeClient(e).start(seedNodes = Seq("127.0.0.1:7000"))
+        Thread.sleep(3000)
+        Future {
+          println(s"Now performing $title $times times ..................................")
+          (0 to times).toList.map { _ =>
+            Await.result(f(client), timeout)
+          }
+          println(s"Performing $title $times times done !!!!!!!!!!!!!!!!")
+        }.andThen { case _ => client.stop() }
+      }
+    )
+    Await.result(future, Duration(10, TimeUnit.MINUTES))
+    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms.\n\n")
+  }
+
+
+  val env = ClusterEnv(replication)
+  val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
+
+  nodes.head.start("127.0.0.1", 7000)
+  nodes.tail.map(_.start(seedNodes = Seq("127.0.0.1:7000")))
+  env.start()
+  Thread.sleep(10000)   // Wait for cluster setup
+
+
+  val id = new AtomicInteger(0)
+  performBy("Scenario", env)(10)(10000) { client =>
+    client.set(id.incrementAndGet().toString, Json.obj(
+      "Hello" -> "World", "key" -> id.get()
+    ))
+    client.get(id.get.toString)
+  }
+
+  nodes.map(_.stop())
+  env.stop()
 }
