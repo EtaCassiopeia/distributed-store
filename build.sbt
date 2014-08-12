@@ -13,8 +13,6 @@ javaOptions in test += "-Dsun.net.maxDatagramSockets=1024"
 
 libraryDependencies += "com.typesafe.akka"         %% "akka-actor"                        % "2.3.3"
 
-libraryDependencies += "com.typesafe.akka"         %% "akka-actor"                        % "2.3.3"
-
 libraryDependencies += "com.typesafe.akka"         %% "akka-cluster"                      % "2.3.3"
 
 libraryDependencies += "com.typesafe.play"         %% "play-json"                         % "2.3.0"
