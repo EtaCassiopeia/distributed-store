@@ -42,7 +42,7 @@ Each node own a finite number of data cell (10 by default). Those cells are form
 each cell is responsible for a partition of keys. The location of a key in the cluster is managed using a consistent hash algorithm on the cells ring.
 Each cell owns its own storage space on disk and it's own commit log file.
 
-If new nodes a added to the cluster while running, the ring will reoganize itself and the nodes will rebalances data between each other.
+If new nodes a added to the cluster while running, the ring will reorganize itself and the nodes will rebalance data between each other.
 
 Operations validation
 -----
