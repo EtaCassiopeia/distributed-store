@@ -173,8 +173,8 @@ object EC2BareMetal extends App {
     val json = s"""{"hello":"world","key":"${id.get}","blob":"${IdGenerator.token(512)}"}"""
     val empty = "{}"
     for {
-      _ <- client.set(key, json)
-      v <- client.get(key)
+      _ <- client.setString(key, json)
+      v <- client.getString(key)
       same <- Future.successful( v.getOrElse(empty) == json )
       _ <- client.delete(key)
     } yield same

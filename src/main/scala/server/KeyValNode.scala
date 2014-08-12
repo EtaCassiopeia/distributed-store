@@ -155,7 +155,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   private[server] def getString(key: String)(implicit ec: ExecutionContext): Future[Option[String]] = {
-    internaGetBytes(key)(ec).map(_.map(new String(_)))
+    internaGetBytes(key)(ec).map(_.map(Iq80DBFactory.asString(_)))
   }
 
   private[server] def setBytes(key: String, value: Array[Byte])(implicit ec: ExecutionContext): Future[OpStatus] = {
