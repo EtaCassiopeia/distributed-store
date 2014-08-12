@@ -154,7 +154,7 @@ object EC2BareMetal extends App {
         }.andThen { case _ => client.stop() }
       }
     )
-    Await.result(future, Duration(10, TimeUnit.MINUTES))
+    Await.result(future, Duration(100, TimeUnit.MINUTES))
     println(s"\n\n$title in ${System.currentTimeMillis() - start} ms. with ${counter.get()} errors\n\n")
   }
 
