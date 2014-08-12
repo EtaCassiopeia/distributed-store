@@ -42,6 +42,8 @@ Each node own a finite number of data cell (10 by default). Those cells are form
 each cell is responsible for a partition of keys. The location of a key in the cluster is managed using a consistent hash algorithm on the cells ring.
 Each cell owns its own storage space on disk and it's own commit log file.
 
+If new nodes a added to the cluster while running, the ring will reoganize itself and the nodes will rebalances data between each other.
+
 Operations validation
 -----
 
@@ -54,7 +56,7 @@ Quorum number can be determined like : `(replicates / 2) + 1`
 If the quorum is not reached, then a rollback operation is launch on each node involved in the operation using a priority mailbox.
 
 You can use two modes of consistency. A sync mode where you actually wait until all response needed for quorum happens. And an async one
-where you only wait for the first response. 
+where you only wait for the first response to return (but the full quorum process is still happening). Another mode will be added where write operations will be fully async, aka no wait at all.  
 
 Data Storage
 -----
