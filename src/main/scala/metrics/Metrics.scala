@@ -36,6 +36,7 @@ class Metrics {
   private[this] val quorumFailureMeter = metrics.meter("quorum.failures")
   private[this] val quorumSuccessMeter = metrics.meter("quorum.success")
   private[this] val quorumTimer = metrics.timer("quorum.time")
+  private[this] val remotingTimer = metrics.timer("remoting.time")
   private[this] val quorumAggregateTimer = metrics.timer("quorum.aggregate")
 
   private[this] val jmxReporter = Reference.empty[JmxReporter]()
@@ -43,6 +44,7 @@ class Metrics {
 
   def endAwait(start: Long) = commandsAwaitTimer.update(System.nanoTime() - start, TimeUnit.NANOSECONDS)
   def startQuorum = quorumTimer.time()
+  def startRemoting = remotingTimer.time()
   def startQuorumAggr = quorumAggregateTimer.time()
   def startCommandclient = commandsTimerClient.time()
   def startCommand = commandsTimerOut.time()
@@ -66,24 +68,29 @@ class Metrics {
 
   private[this] lazy val gen = IdGenerator(512)
 
+  private[this] val filter = Seq("operations-in", "operations-out", "operations-client", "quorum-aggregate", "quorum-time", "remoting-time")
+
   private[this] def dataFromJMX(name: String): JsArray = {
     var obj = Json.arr()
     Try {
       for (objectname <- mbs.queryNames(new ObjectName(s"$name:name=*"), null).toList.sortWith { (o1, o2) => o1.getCanonicalName.compareTo(o2.getCanonicalName) < 0 }) {
-        var bean = Json.obj("name" -> objectname.getCanonicalName.replace(s"$name:name=", "").replace(".", "-"))
-        bean = bean ++ Json.obj("_id" -> s"${gen.nextId()}")
-        bean = bean ++ Json.obj("@timestamp" -> DateTime.now().getMillis)//.toString("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"))
-        mbs.getMBeanInfo(objectname).getAttributes.map { info =>
-          mbs.getAttribute(objectname, info.getName) match {
-            case a if a.getClass == classOf[String] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[String])
-            case a if a.getClass == classOf[java.lang.Long] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Long])
-            case a if a.getClass == classOf[java.lang.Double] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Double])
-            case a if a.getClass == classOf[java.lang.Integer] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Int])
-            case a if a.getClass == classOf[java.lang.Boolean] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Boolean])
-            case a =>
+        val thename = objectname.getCanonicalName.replace(s"$name:name=", "").replace(".", "-")
+        if (filter.contains(thename)) {
+          var bean = Json.obj("name" -> thename)
+          bean = bean ++ Json.obj("_id" -> s"${gen.nextId()}")
+          bean = bean ++ Json.obj("@timestamp" -> DateTime.now().getMillis) //.toString("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"))
+          mbs.getMBeanInfo(objectname).getAttributes.map { info =>
+            mbs.getAttribute(objectname, info.getName) match {
+              case a if a.getClass == classOf[String] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[String])
+              case a if a.getClass == classOf[java.lang.Long] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Long])
+              case a if a.getClass == classOf[java.lang.Double] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Double])
+              case a if a.getClass == classOf[java.lang.Integer] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Int])
+              case a if a.getClass == classOf[java.lang.Boolean] => bean = bean ++ Json.obj(info.getName -> a.asInstanceOf[Boolean])
+              case a =>
+            }
           }
+          obj = obj :+ bean
         }
-        obj = obj :+ bean
       }
     }
     obj

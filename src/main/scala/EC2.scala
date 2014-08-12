@@ -11,6 +11,7 @@ import server.{NodeClient, KeyValNode}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.util.{Try, Failure, Success}
+import server.implicits._
 
 object EC2Node extends App {
 
@@ -128,8 +129,11 @@ object EC2Client extends App {
 
 object EC2BareMetal extends App {
 
-  val nodeAmount = 10
-  val replication = 4
+  val nodeAmount = 6
+  val replication = 3
+  val clients = 10
+  val nbrOps = 100000
+
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
 
@@ -153,7 +157,7 @@ object EC2BareMetal extends App {
   }
 
 
-  val env = ClusterEnv(replication)
+  val env = ClusterEnv(replication, 1, 1)
   val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
 
   nodes.head.start("127.0.0.1", 7000)
@@ -163,7 +167,7 @@ object EC2BareMetal extends App {
 
 
   val id = new AtomicInteger(0)
-  performBy("Scenario", env)(10)(10000) { client =>
+  performBy("Scenario", env)(clients)(nbrOps) { client =>
     client.set(id.incrementAndGet().toString, Json.obj(
       "Hello" -> "World", "key" -> id.get()
     ))

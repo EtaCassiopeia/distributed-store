@@ -6,6 +6,7 @@ import org.specs2.mutable.{Specification, Tags}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
+import server.implicits._
 
 class RetrySpec extends Specification with Tags {
   sequential

@@ -10,6 +10,7 @@ import server.{NodeClient, KeyValNode}
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.util.Try
+import server.implicits._
 
 class BasicSpec extends Specification with Tags {
   sequential

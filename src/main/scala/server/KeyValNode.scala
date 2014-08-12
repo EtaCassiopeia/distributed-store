@@ -18,6 +18,14 @@ import play.api.libs.json.{JsValue, Json}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Random, Try}
 
+trait BytesReader[T] {
+  def fromBytes(bytes: Array[Byte]): Try[T]
+}
+
+trait BytesWriter[T] {
+  def toBytes(obj: T): Array[Byte]
+}
+
 class KeyValNode(val name: String, val config: Configuration, val path: File, val env: ClusterEnv, val metrics: Metrics, val clientOnly: Boolean = false) extends ClusterSupport with QuorumSupport with RebalanceSupport {
 
   private[server] val system = Reference.empty[ActorSystem]()
@@ -96,24 +104,24 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   }
 
   // Client API
-  private[server] def set(key: String, value: JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def set[T](key: String, value: T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
     val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
-    performOperationWithQuorum(SetOperation(key, value, time, id), targets)
+    performOperationWithQuorum(SetOperation(key, w.toBytes(value), time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
       case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
-  private[server] def set(key: String)(value: => JsValue)(implicit ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def set[T](key: String)(value: => T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
     val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
-    performOperationWithQuorum(SetOperation(key, value, time, id), targets)
+    performOperationWithQuorum(SetOperation(key, w.toBytes(value), time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
       case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
@@ -132,12 +140,12 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     }
   }
 
-  private[server] def get(key: String)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
+  private[server] def get[T](key: String)(implicit r: BytesReader[T], ec: ExecutionContext): Future[Option[T]] = {
     val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
-    performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value)
+    performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value.flatMap(r.fromBytes(_).toOption))
       .andThen { case _ => ctx.close() }
       .recover {
       case _ => None     // TODO : only for managed errors

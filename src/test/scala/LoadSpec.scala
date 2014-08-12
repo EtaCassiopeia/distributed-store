@@ -9,6 +9,7 @@ import server._
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
+import server.implicits._
 
 class LoadSpec extends Specification with Tags {
   sequential
@@ -111,7 +112,7 @@ class Load2Spec extends Specification with Tags {
 
   "Distributed Map" should {
 
-    val env = ClusterEnv(3)
+    val env = ClusterEnv(3, 1, 1)
     val node1 = KeyValNode(s"node1-${IdGenerator.token(6)}", env)
     val node2 = KeyValNode(s"node2-${IdGenerator.token(6)}", env)
     val node3 = KeyValNode(s"node3-${IdGenerator.token(6)}", env)
@@ -171,8 +172,11 @@ class Load2Spec extends Specification with Tags {
 class Load3Spec extends Specification with Tags {
   sequential
 
-  val nodeAmount = 10
-  val replication = 4
+  val nodeAmount = 3
+  val replication = 3
+  val clients = 3
+  val nbrOps = 100000
+
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
 
@@ -197,7 +201,7 @@ class Load3Spec extends Specification with Tags {
 
   "Distributed Map" should {
 
-    val env = ClusterEnv(replication)
+    val env = ClusterEnv(replication, 1, 1)
     val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
 
     "Start some nodes" in {
@@ -210,7 +214,7 @@ class Load3Spec extends Specification with Tags {
 
     "Perform scenario" in {
       val id = new AtomicInteger(0)
-      performBy("Scenario", env)(10)(10000) { client =>
+      performBy("Scenario", env)(clients)(nbrOps) { client =>
         client.set(id.incrementAndGet().toString, Json.obj(
           "Hello" -> "World", "key" -> id.get()
         ))

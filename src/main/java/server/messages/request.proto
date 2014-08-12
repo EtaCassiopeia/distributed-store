@@ -1,0 +1,13 @@
+package messages;
+
+option java_package = "server.messages";
+option java_outer_classname = "RequestProto";
+
+message Request {
+  required int32 op = 1;
+  required int64 id = 2;
+  required string key = 3;
+  required int64 time = 4;
+  required int64 start = 5;
+  optional bytes value = 6;
+}

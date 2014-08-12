@@ -12,7 +12,7 @@ import config.{ClusterEnv, Env}
 import metrics.Metrics
 import org.iq80.leveldb.Options
 import org.iq80.leveldb.impl.Iq80DBFactory
-import play.api.libs.json.{JsObject, JsValue, Json}
+import play.api.libs.json.{Json, JsObject}
 
 import scala.collection.JavaConversions._
 import scala.util.{Failure, Success, Try}
@@ -28,7 +28,7 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
   private[this] val db = Iq80DBFactory.factory.open(new File(path, "leveldb"), options)
 
   private[this] val keySet = Sets.newConcurrentHashSet[String]()
-  private[this] val memoryTable = new ConcurrentHashMap[String, JsValue]()
+  private[this] val memoryTable = new ConcurrentHashMap[String, Array[Byte]]()
   private[this] val removedCache = Sets.newConcurrentHashSet[String]()
   private[this] val syncRunning = new AtomicBoolean(false)
   private[this] val checkSize = new AtomicLong(0L)
@@ -160,23 +160,23 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     }
   }
 
-  private[this] def set(key: String, value: JsValue) = {
+  private[this] def set(key: String, value: Array[Byte]) = {
     keySet.add(key)
     if (removedCache.contains(key)) removedCache.remove(key)
     Option(memoryTable.put(key, value))
   }
 
-  private[this] def get(key: String) = {
+  private[this] def get(key: String): Option[Array[Byte]] = {
     if (memoryTable.containsKey(key)) {
       Some(memoryTable.get(key))
     } else if (removedCache.contains(key)) {
       None
     } else {
-      Option(Iq80DBFactory.asString(db.get(Iq80DBFactory.bytes(key)))).map(Json.parse)
+      Option(db.get(Iq80DBFactory.bytes(key)))
     }
   }
 
-  private[this] def delete(key: String) = {
+  private[this] def delete(key: String): Option[Array[Byte]] = {
     keySet.remove(key)
     removedCache.add(key)
     Option(memoryTable.remove(key))
@@ -187,7 +187,7 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
     val ctx2 = metrics.write
     def perform = {
       syncCacheIfNecessary()
-      Files.append(s"SET:::${op.key}:::${Json.stringify(op.value)}\n", commitLog, Env.UTF8)
+      Files.append(s"SET:::${op.key}:::${Iq80DBFactory.asString(op.value)}\n", commitLog, Env.UTF8)
       val old = set(op.key, op.value)
       ctx.close()
       ctx2.close()

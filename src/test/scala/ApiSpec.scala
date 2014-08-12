@@ -8,6 +8,7 @@ import server.{KeyValNode, NodeClient}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext}
+import server.implicits._
 
 package object server {
   object TargetAccessor {

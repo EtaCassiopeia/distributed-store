@@ -9,6 +9,7 @@ import server.{KeyValNode, NodeClient}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success}
+import server.implicits._
 
 object Constants {
   val host = "192.168.1.11"//"127.0.0.1" //"192.168.1.34"

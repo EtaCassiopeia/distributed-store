@@ -8,6 +8,8 @@ import com.google.common.hash.{HashCode, Hashing}
 import com.typesafe.config.Config
 import config.Env
 import metrics.Metrics
+import play.api.libs.json.Json
+import server.messages.RequestProto.Request
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Promise}
@@ -62,6 +64,22 @@ class NodeCell(name: String, db: OnDiskStore, metrics: Metrics) extends Actor {
     case o @ DeleteOperation(key, t, id, start) => {
       sender() ! db.deleteOperation(o)
       metrics.endAwait(start)
+    }
+    case req: Request => {
+      req.getOp match {
+        case 0 => {
+          sender() ! db.setOperation(SetOperation(req.getKey, req.getValue.toByteArray, req.getTime, req.getId, req.getStart)).toProtobuf
+          metrics.endAwait(req.getStart)
+        }
+        case 1 => {
+          sender() ! db.getOperation(GetOperation(req.getKey, req.getTime, req.getId, req.getStart)).toProtobuf
+          metrics.endAwait(req.getStart)
+        }
+        case 2 => {
+          sender() ! db.deleteOperation(DeleteOperation(req.getKey, req.getTime, req.getId, req.getStart)).toProtobuf
+          metrics.endAwait(req.getStart)
+        }
+      }
     }
     // Rollback messages have the highest priority in cells, so rollback happen right away
     case Rollback(status) => {
