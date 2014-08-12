@@ -129,13 +129,13 @@ object EC2Client extends App {
 
 object EC2BareMetal extends App {
 
-  val nodeAmount = 6
+  val nodeAmount = 20
   val replication = 3
-  val clients = 10
-  val nbrOps = 100000
+  val clients = 50
+  val nbrOps = 20000
 
   val timeout = Duration(10, TimeUnit.SECONDS)
-  implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(600))
 
   def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[Boolean]): Unit = {
     val counter = new AtomicInteger(0)
@@ -151,11 +151,11 @@ object EC2BareMetal extends App {
             if (!success) counter.incrementAndGet()
           }
           println(s"Performing $title $times times done !!!!!!!!!!!!!!!!")
+          println(s"\n\n$title in ${System.currentTimeMillis() - start} ms. with ${counter.get()} errors\n\n")
         }.andThen { case _ => client.stop() }
       }
     )
     Await.result(future, Duration(100, TimeUnit.MINUTES))
-    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms. with ${counter.get()} errors\n\n")
   }
 
 
@@ -170,7 +170,7 @@ object EC2BareMetal extends App {
   val id = new AtomicInteger(0)
   performBy("Scenario", env)(clients)(nbrOps) { client =>
     val key = id.incrementAndGet().toString
-    val json = s"""{"hello":"world","key":"${id.get}","blob":"${IdGenerator.token(512)}"}"""
+    val json = s"""{"hello":"world","key":"${id.get}","blob":"${IdGenerator.token(1024)}"}"""
     val empty = "{}"
     for {
       _ <- client.setString(key, json)
