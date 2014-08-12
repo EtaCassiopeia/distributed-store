@@ -3,7 +3,7 @@ import java.util.concurrent.{Executors, TimeUnit}
 
 import common.IdGenerator
 import config.ClusterEnv
-import play.api.libs.json.Json
+import play.api.libs.json.{JsValue, Json}
 import server.{KeyValNode, NodeClient}
 
 import scala.concurrent.duration.Duration
@@ -61,7 +61,7 @@ object Host1WithClient extends App {
       for (j <- 0 to 100) {
         val id = IdGenerator.uuid
         seq = seq :+ id
-        Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))).andThen {
+        Await.result(client.set[JsValue](id, Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))).andThen {
           case Success(_) => success
           case Failure(_) => failW
         }, timeout)
@@ -172,7 +172,7 @@ object SimpleHostWithClients extends App {
       for (j <- 0 to 1000) {
         val id = IdGenerator.uuid
         seq = seq :+ id
-        Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+        Await.result(client.set[JsValue](id, Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
       }
       seq.foreach { id =>
         Await.result(client.get(id), timeout)
