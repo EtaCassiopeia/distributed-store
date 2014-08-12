@@ -5,7 +5,7 @@ import java.util.concurrent.{TimeUnit, Executors}
 import com.codahale.metrics.{ConsoleReporter, MetricRegistry}
 import common.IdGenerator
 import config.ClusterEnv
-import play.api.libs.json.Json
+import play.api.libs.json.{JsValue, Json}
 import server.{NodeClient, KeyValNode}
 
 import scala.concurrent.duration.Duration
@@ -89,7 +89,7 @@ object EC2Client extends App {
       for (j <- 0 to 100) {
         val id = IdGenerator.uuid
         seq = seq :+ id
-        Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))).andThen {
+        Await.result(client.set[JsValue](id, Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))).andThen {
           case Success(_) => success.mark()
           case Failure(_) => failW.mark()
         }, timeout)
