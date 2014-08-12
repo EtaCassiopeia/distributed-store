@@ -103,28 +103,28 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     }
   }
 
-  // Client API
-  private[server] def set[T](key: String, value: T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
+  // Internal API
+  private[server] def internalSetBytes(key: String, value: Array[Byte])(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
-    performOperationWithQuorum(SetOperation(key, w.toBytes(value), time, id), targets)
+    performOperationWithQuorum(SetOperation(key, value, time, id), targets)
       .andThen { case _ => ctx.close() }
       .recover {
       case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
     }
   }
 
-  private[server] def set[T](key: String)(value: => T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
+  private[server] def internaGetBytes(key: String)(implicit ec: ExecutionContext): Future[Option[Array[Byte]]] = {
     val ctx = metrics.startCommand
     val targets = targetAndNext(key, env.replicates)
     val time = System.currentTimeMillis()
     val id = generator.nextId()
-    performOperationWithQuorum(SetOperation(key, w.toBytes(value), time, id), targets)
+    performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value)
       .andThen { case _ => ctx.close() }
       .recover {
-      case _ => OpStatus(false, key, None, time, id)   // TODO : only for managed errors
+      case _ => None     // TODO : only for managed errors
     }
   }
 
@@ -140,16 +140,30 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     }
   }
 
+  // Client API
+
+  private[server] def set[T](key: String, value: T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
+    internalSetBytes(key, w.toBytes(value))(ec)
+  }
+
   private[server] def get[T](key: String)(implicit r: BytesReader[T], ec: ExecutionContext): Future[Option[T]] = {
-    val ctx = metrics.startCommand
-    val targets = targetAndNext(key, env.replicates)
-    val time = System.currentTimeMillis()
-    val id = generator.nextId()
-    performOperationWithQuorum(GetOperation(key, time, id), targets).map(_.value.flatMap(r.fromBytes(_).toOption))
-      .andThen { case _ => ctx.close() }
-      .recover {
-      case _ => None     // TODO : only for managed errors
-    }
+    internaGetBytes(key)(ec).map(_.flatMap(r.fromBytes(_).toOption))
+  }
+
+  private[server] def setString(key: String, value: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    internalSetBytes(key, Iq80DBFactory.bytes(value))(ec)
+  }
+
+  private[server] def getString(key: String)(implicit ec: ExecutionContext): Future[Option[String]] = {
+    internaGetBytes(key)(ec).map(_.map(new String(_)))
+  }
+
+  private[server] def setBytes(key: String, value: Array[Byte])(implicit ec: ExecutionContext): Future[OpStatus] = {
+    internalSetBytes(key, value)(ec)
+  }
+
+  private[server] def getBytes(key: String)(implicit ec: ExecutionContext): Future[Option[Array[Byte]]] = {
+    internaGetBytes(key)(ec)
   }
 
   private[server] def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {

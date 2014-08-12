@@ -45,13 +45,6 @@ class NodeClient(env: Metrics, node: KeyValNode)  {
     }(ec)
   }
 
-  def set[T](key: String)(value: => T)(implicit w: BytesWriter[T], ec: ExecutionContext): Future[OpStatus] = {
-    val ctx = env.startCommandclient
-    node.set(key, value)(w, ec).andThen {
-      case _ => ctx.close()
-    }(ec)
-  }
-
   def delete(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommandclient
     node.delete(key)(ec).andThen {
@@ -69,6 +62,34 @@ class NodeClient(env: Metrics, node: KeyValNode)  {
   def getOp(key: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
     val ctx = env.startCommandclient
     node.getOp(key)(ec).andThen {
+      case _ => ctx.close()
+    }(ec)
+  }
+
+  def setString(key: String, value: String)(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommandclient
+    node.setString(key, value)(ec).andThen {
+      case _ => ctx.close()
+    }(ec)
+  }
+
+  def getString(key: String)(implicit ec: ExecutionContext): Future[Option[String]] = {
+    val ctx = env.startCommandclient
+    node.getString(key)(ec).andThen {
+      case _ => ctx.close()
+    }(ec)
+  }
+
+  def setBytes(key: String, value: Array[Byte])(implicit ec: ExecutionContext): Future[OpStatus] = {
+    val ctx = env.startCommandclient
+    node.setBytes(key, value)(ec).andThen {
+      case _ => ctx.close()
+    }(ec)
+  }
+
+  def getBytes(key: String)(implicit ec: ExecutionContext): Future[Option[Array[Byte]]] = {
+    val ctx = env.startCommandclient
+    node.getBytes(key)(ec).andThen {
       case _ => ctx.close()
     }(ec)
   }

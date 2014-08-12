@@ -137,7 +137,8 @@ object EC2BareMetal extends App {
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
 
-  def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[_]): Unit = {
+  def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[Boolean]): Unit = {
+    val counter = new AtomicInteger(0)
     val start = System.currentTimeMillis()
     val future = Future.sequence(
       (0 to many).toList.map { _ =>
@@ -146,14 +147,15 @@ object EC2BareMetal extends App {
         Future {
           println(s"Now performing $title $times times ..................................")
           (0 to times).toList.map { _ =>
-            Await.result(f(client), timeout)
+            val success = Await.result(f(client), timeout)
+            if (!success) counter.incrementAndGet()
           }
           println(s"Performing $title $times times done !!!!!!!!!!!!!!!!")
         }.andThen { case _ => client.stop() }
       }
     )
     Await.result(future, Duration(10, TimeUnit.MINUTES))
-    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms.\n\n")
+    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms. with ${counter.get()} errors\n\n")
   }
 
 
@@ -165,15 +167,19 @@ object EC2BareMetal extends App {
   env.start()
   Thread.sleep(10000)   // Wait for cluster setup
 
-
   val id = new AtomicInteger(0)
   performBy("Scenario", env)(clients)(nbrOps) { client =>
-    client.set(id.incrementAndGet().toString, Json.obj(
-      "Hello" -> "World", "key" -> id.get()
-    ))
-    client.get(id.get.toString)
+    val key = id.incrementAndGet().toString
+    val json = s"""{"hello":"world","key":"${id.get}","blob":"${IdGenerator.token(512)}"}"""
+    val empty = "{}"
+    for {
+      _ <- client.set(key, json)
+      v <- client.get(key)
+      same <- Future.successful( v.getOrElse(empty) == json )
+      _ <- client.delete(key)
+    } yield same
   }
-
   nodes.map(_.stop())
   env.stop()
+  System.exit(0)
 }
