@@ -35,14 +35,18 @@ class OnDiskStore(val name: String, val config: Configuration, val path: File, v
 
   private[this] val locks = new ConcurrentHashMap[String, Unit]()
 
+  private[this] val maxKeysInMemory = 128
+  private[this] val maxCommitLogSize = maxKeysInMemory * (1024 * 1024)
+
   options.createIfMissing(true)
 
   restore()
 
   def commitFileTooBig(): Boolean = {
     checkSize.incrementAndGet()
-    if (checkSize.compareAndSet(100, 0)) {
-      commitLog.length() > (16 * (1024 * 1024))
+    if (checkSize.compareAndSet(32, 0)) {
+      if (memoryTable.keySet().size() > maxKeysInMemory) true
+      else commitLog.length() > maxCommitLogSize
     } else {
       false
     }
