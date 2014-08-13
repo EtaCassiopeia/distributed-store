@@ -16,30 +16,36 @@ Various techs are on this project
 
 * Scala 2.11
 * Akka and akka-cluster module
-* Level DB
+* LevelDB (Java impl)
 * Play Json lib
-* Guava
+* Google Guava
+* Google Protocol Buffer
 * Typesafe config lib
-* Metrics
+* Yammer Metrics
 
 Cluster
 -----
 
-The cluster is provided by the awesome akka-cluster library (http://doc.akka.io/docs/akka/2.3.4/common/cluster.html). It provides a fault-tolerant decentralized peer-to-peer based cluster membership service with no single point of failure or single point of bottleneck. It does this using gossip protocols and an automatic failure detector. 
-Two types of nodes are possible in the cluster, datastore nodes or client nodes. Client are full part of the cluster and are perfectly aware of the cluster topology.
+The cluster is provided by the awesome akka-cluster library (http://doc.akka.io/docs/akka/2.3.4/common/cluster.html). 
+It provides a fault-tolerant decentralized peer-to-peer based cluster membership service with 
+no single point of failure or single point of bottleneck. It does this using gossip protocols and an automatic failure detector. 
+Two types of nodes are possible in the cluster, datastore nodes or client nodes. 
+Clients are full part of the cluster and are perfectly aware of the cluster topology.
 
 Messaging
 -----
 
 Nodes are communicating with each other using akka and its remoting capabilities. 
 Messages are serialized using Google Protobuf for better efficiency.
-Experiments will be made to use more heavy stuff like Apache Thrift and Nifty.
+Experiments will be made to use more serious stuff like Apache Thrift and Nifty.
+Different messages are used for the various types of operations. A response message is used too.
 
 Data partitions and balancing
 -----
 
 Each node own a finite number of data cell (10 by default). Those cells are forming a ring with other cells from cluster nodes and
-each cell is responsible for a partition of keys. The location of a key in the cluster is managed using a consistent hash algorithm on the cells ring.
+each cell is responsible for a partition of keys. The location of a key in the cluster is managed using a consistent 
+hash algorithm on the cells ring.
 Each cell owns its own storage space on disk and it's own commit log file.
 
 If new nodes a added to the cluster while running, the ring will reorganize itself and the nodes will rebalance data between each other.
@@ -47,26 +53,32 @@ If new nodes a added to the cluster while running, the ring will reorganize itse
 Operations validation
 -----
 
-When data is fetched or written to the cluster, data is replicated over several nodes for high-availability and durability concerns.
-You can configure a number N of replicates according to the number of nodes at your disposal.
+When data is read or written to the cluster, data is replicated over several nodes for high-availability and durability concerns.
+You can configure a number `N of replicates according to the number of nodes at your disposal.
 Each operation is valid only if a majority of replicates agrees on it (a quorum). 
 
 Quorum number can be determined like : `(replicates / 2) + 1`
 
-If the quorum is not reached, then a rollback operation is launch on each node involved in the operation using a priority mailbox.
+If the quorum is not reached, then a rollback operation is sent to each node involved in the operation and processed using a priority mailbox.
+Transactions does not use locks to work so the behavior can be weird sometimes (you can read something not consistent, but quorum on read should help to avoid that).
 
 You can use two modes of consistency. A sync mode where you actually wait until all response needed for quorum happens. And an async one
-where you only wait for the first response to return (but the full quorum process is still happening). Another mode will be added where write operations will be fully async, aka no wait at all.  
+where you only wait for the first response to return (but the full quorum process is still happening). Another mode will be added 
+where write operations will be fully async, aka no wait at all.  
 
 Data Storage
 -----
 
-When a write operation happens on a node, it's first written in an operation append-only log to ensure durability. Then the data is written
-in a memory structure that can be queried. When the structure is full (too much data, too much keys), it is persisted on disk (using LevelDB)
-and the operation log is rolled. In case of a node crash, the node will replay first its operation log before starting serving requests.
+For a write, the client will first search for the target node and its replicates. An operation message will be send to each of those nodes.
+Arrived on a node, the operation is first written in an append-only log to ensure durability. Then, using the key, 
+the node will chose in which cell 
+the data should be written, and then the data is written in an in-memory structure. Here, the data can be manipulated like any other data. 
+When the structure is full (too much data, too much keys), it is persisted on disk (using LevelDB)
+and the operation log is rolled. In case of a node crash, the node will first replay all the operations in the log to fill 
+the in-memory structure before starting serving requests. Everything persisted on disk will still be there (except if the hard drive is dead, but that's another story)
 
-When a read operation is performed, the data will be searched in the in-memory structure first. If it's not available there, then the node will search 
-in the levelDB on disk.
+For a read operation, after node and cell targeting, the data will be searched in the in-memory structure of the cell first. If it's not available there, then the node will search 
+in the cell levelDB (on disk, so it's slower).
 
 Metrics
 -----
@@ -77,55 +89,54 @@ API usage example
 ----
 
 ```scala
+import java.util.concurrent.Executors
 
-/**
- * Here every operation on the client is async, so the following example isn't 100% accurate
- */
+import config.ClusterEnv
+import play.api.libs.json.Json
+import server.{KeyValNode, NodeClient}
 
-implicit val timeout = Duration(1, TimeUnit.SECONDS)
-implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
-val nbrOfReplicates = 2
+import scala.concurrent.ExecutionContext
 
-val env = ClusterEnv(replicates = 2)
-val node1 = KeyValNode("node1", env).start()  // nodes can be started on different physical nodes
-val node2 = KeyValNode("node2", env).start() 
-val node3 = KeyValNode("node3", env).start() 
-val node4 = KeyValNode("node4", env).start() 
-val node5 = KeyValNode("node5", env).start() 
+object ReadmeSample extends App {
 
-val client = NodeClient(env).start()
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
 
-client.set("key1", Json.obj("hello" -> "world"))  // persisted on n + 1 nodes  
-client.set("key99", Json.obj("goodbye" -> "world")) // persisted on n + 1 nodes  
+  val nbrOfReplicates = 3
 
-node3.stop() // Data are rebalanced across nodes
+  val env = ClusterEnv(nbrOfReplicates)
+  val node1 = KeyValNode("node1", env).start("127.0.0.1", 7000)  // nodes can be started on different physical nodes
+  val node2 = KeyValNode("node2", env).start(seedNodes = Seq("127.0.0.1:7000"))
+  val node3 = KeyValNode("node3", env).start(seedNodes = Seq("127.0.0.1:7000"))
+  val node4 = KeyValNode("node4", env).start(seedNodes = Seq("127.0.0.1:7000"))
+  val node5 = KeyValNode("node5", env).start(seedNodes = Seq("127.0.0.1:7000"))
 
-client.set("key50", Json.obj("mehhh" -> "world")) // persisted on n + 1 nodes  
-client.get("key1") match {
-    case Some(doc) => println(Json.stringify(doc))
-    case None => println("Fail !!!") 
+  val client = NodeClient(env).start(seedNodes = Seq("127.0.0.1:7000"))
+
+  val result = for {
+    _ <- client.set("key1", Json.obj("hello" -> "world"))  // persisted on 3 nodes
+    _ <- client.set("key99", Json.obj("goodbye" -> "world")) // persisted on 3 nodes
+    _ <- client.set("key50", Json.obj("mehhh" -> "world")) // persisted on 3 nodes
+    key1 <- client.get("key1")
+    key99 <- client.get("key99")
+    key50 <- client.get("key50")
+    _ <- client.delete("key1")
+    _ <- client.delete("key50")
+    _ <- client.delete("key99")
+  } yield (key1, key50, key99)
+
+  result.map {
+    case (key1, key50, key99) =>
+      println(key1.map(Json.stringify(_)).getOrElse("Fail to read key1"))
+      println(key50.map(Json.stringify(_)).getOrElse("Fail to read key50"))
+      println(key99.map(Json.stringify(_)).getOrElse("Fail to read key99"))
+  } andThen {
+    case _ =>
+      client.stop()
+      node1.stop()
+      node2.stop()
+      node3.stop()
+      node4.stop()
+      node5.stop()
+  }
 }
-
-node3.start() // Data are rebalanced across nodes
-
-client.get("key99") match {
-    case Some(doc) => println(Json.stringify(doc))
-    case None => println("Fail !!!") 
-}
-client.get("key50") match {
-    case Some(doc) => println(Json.stringify(doc))
-    case None => println("Fail !!!") 
-}
-
-client.delete("key1")
-client.delete("key50")
-client.delete("key99")
-
-client.stop()
-node1.stop()
-node2.stop()
-node3.stop()
-node4.stop()
-node5.stop()
-
 ```
