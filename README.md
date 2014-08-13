@@ -54,7 +54,7 @@ Operations validation
 -----
 
 When data is read or written to the cluster, data is replicated over several nodes for high-availability and durability concerns.
-You can configure a number `N of replicates according to the number of nodes at your disposal.
+You can configure a number `N` of replicates according to the number of nodes at your disposal.
 Each operation is valid only if a majority of replicates agrees on it (a quorum). 
 
 Quorum number can be determined like : `(replicates / 2) + 1`
