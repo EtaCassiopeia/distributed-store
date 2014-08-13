@@ -26,7 +26,7 @@ trait QuorumSupport { self: KeyValNode =>
       case _: GetOperation => env.quorumRead
       case _ => env.quorumWrite
     }
-    performOperationWithQuorumAndTrigger(op, targets, quorumNbr)
+    performOperationWithQuorumAndTrigger(op, targets, quorumNbr, env.fullAsync)
   }
 
   private[this] def extractQuorum(op: Operation, lll: Seq[LocalizedStatus], quorumNbr: Int, actorSys: ActorSystem, address: Address, selection: ActorSelection): OpStatus = {
@@ -79,7 +79,7 @@ trait QuorumSupport { self: KeyValNode =>
     OpStatus(res.getSuc, res.getKey, if (res.hasValue) Some(res.getValue.toByteArray) else None, res.getTime, res.getId, if (res.hasOld) Some(res.getOld.toByteArray) else None)
   }
 
-  private[this] def performOperationWithQuorumAndTrigger(op: Operation, targets: Seq[Member], quorumNbr: Int): Future[OpStatus] = {
+  private[this] def performOperationWithQuorumAndTrigger(op: Operation, targets: Seq[Member], quorumNbr: Int, fullAsync: Boolean): Future[OpStatus] = {
     val actorSys = system()
     val selection = NodeCell.cellName(op.key, actorSys)
     implicit val ec = system().dispatcher
@@ -134,10 +134,15 @@ trait QuorumSupport { self: KeyValNode =>
     }.onFailure {
       case e => promise.tryFailure(e)
     }
-    promise.future.andThen {
+    val fu =  promise.future.andThen {
       case Success(OpStatus(false, _, _, _, _, _)) => metrics.quorumFailure
       case Success(OpStatus(true, _, _, _, _, _)) => metrics.quorumSuccess
       case Failure(_) => metrics.quorumFailure
+    }
+    op match {
+      case _: GetOperation => fu
+      case e if fullAsync => Future.successful(OpStatus(true, op.key, None, op.timestamp, op.operationId))
+      case e if !fullAsync => fu
     }
   }
 

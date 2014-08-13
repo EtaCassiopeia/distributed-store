@@ -133,7 +133,7 @@ class ConcurrentUsageSpec extends Specification with Tags {
           for (j <- 0 to 100) {
             val id = IdGenerator.uuid
             seq = seq :+ id
-            Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+            Await.result(client.set(id, Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
           }
           seq.foreach { id =>
             Try { Await.result(client.get(id), timeout) should not beNone }.toOption.foreach(_ => counter.incrementAndGet())
@@ -204,7 +204,7 @@ class ConcurrentUsageConcurrentClientsSpec extends Specification with Tags {
           for (j <- 0 to 100) {
             val id = IdGenerator.uuid
             seq = seq :+ id
-            Await.result(client.set(id)(Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
+            Await.result(client.set(id, Json.obj("hello" -> "world", "id" -> id, "stuff1" -> IdGenerator.extendedToken(256), "stuff2" -> IdGenerator.extendedToken(256))), timeout)
           }
           seq.foreach { id =>
             Try { Await.result(client.get(id), timeout) should not beNone }.toOption.foreach(_ => counter.incrementAndGet())

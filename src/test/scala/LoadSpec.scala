@@ -175,12 +175,13 @@ class Load3Spec extends Specification with Tags {
   val nodeAmount = 3
   val replication = 3
   val clients = 3
-  val nbrOps = 100000
+  val nbrOps = 30000
 
   val timeout = Duration(10, TimeUnit.SECONDS)
   implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
 
-  def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[_]): Unit = {
+  def performBy(title: String, e: ClusterEnv)(many: Int)(times: Int)(f: NodeClient => Future[Boolean]): Unit = {
+    val counter = new AtomicInteger(0)
     val start = System.currentTimeMillis()
     val future = Future.sequence(
       (0 to many).toList.map { _ =>
@@ -189,19 +190,20 @@ class Load3Spec extends Specification with Tags {
         Future {
           println(s"Now performing $title $times times ..................................")
           (0 to times).toList.map { _ =>
-            Await.result(f(client), timeout)
+            val success = Await.result(f(client), timeout)
+            if (!success) counter.incrementAndGet()
           }
           println(s"Performing $title $times times done !!!!!!!!!!!!!!!!")
+          println(s"\n\n$title in ${System.currentTimeMillis() - start} ms. with ${counter.get()} errors\n\n")
         }.andThen { case _ => client.stop() }
       }
     )
-    Await.result(future, Duration(10, TimeUnit.MINUTES))
-    println(s"\n\n$title in ${System.currentTimeMillis() - start} ms.\n\n")
+    Await.result(future, Duration(100, TimeUnit.MINUTES))
   }
 
   "Distributed Map" should {
 
-    val env = ClusterEnv(replication, 1, 1)
+    val env = ClusterEnv(replication, 1, 1, false)
     val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
 
     "Start some nodes" in {
@@ -215,10 +217,15 @@ class Load3Spec extends Specification with Tags {
     "Perform scenario" in {
       val id = new AtomicInteger(0)
       performBy("Scenario", env)(clients)(nbrOps) { client =>
-        client.set(id.incrementAndGet().toString, Json.obj(
-          "Hello" -> "World", "key" -> id.get()
-        ))
-        client.get(id.get.toString)
+        val key = id.incrementAndGet().toString
+        val json = s"""{"hello":"world","key":"${id.get}","blob":"${IdGenerator.token(1024)}"}"""
+        val empty = "{}"
+        for {
+          _ <- client.setString(key, json)
+          v <- client.getString(key)
+          same <- Future.successful( v.getOrElse(empty) == json )
+          _ <- client.delete(key)
+        } yield same
       }
       success
     }
