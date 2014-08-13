@@ -9,24 +9,24 @@ Date are distributed accross the nodes based on their key (Consistent Hasing)
 and for each operation, data are replicated on/retrieved from the `n` following nodes.
 Each operation is validated by a majority of nodes.
 
-Techs
+Libraries
 -----
 
-Various techs are on this project
+Various libraries are used in the project
 
 * Scala 2.11
-* Akka and akka-cluster module
-* LevelDB (Java impl)
-* Play Json lib
-* Google Guava
-* Google Protocol Buffer
-* Typesafe config lib
-* Yammer Metrics
+* Akka and akka-cluster module (http://doc.akka.io/docs/akka/2.3.4/common/cluster.html)
+* LevelDB (Java impl. https://github.com/dain/leveldb)
+* Play Json lib (https://www.playframework.com/documentation/2.3.x/ScalaJson)
+* Google Guava (https://code.google.com/p/guava-libraries/)
+* Google Protocol Buffers (https://code.google.com/p/protobuf/)
+* Typesafe config lib (https://github.com/typesafehub/config)
+* Yammer Metrics (http://metrics.codahale.com/)
 
 Cluster
 -----
 
-The cluster is provided by the awesome akka-cluster library (http://doc.akka.io/docs/akka/2.3.4/common/cluster.html). 
+The cluster is provided by the awesome akka-cluster library. 
 It provides a fault-tolerant decentralized peer-to-peer based cluster membership service with 
 no single point of failure or single point of bottleneck. It does this using gossip protocols and an automatic failure detector. 
 Two types of nodes are possible in the cluster, datastore nodes or client nodes. 
