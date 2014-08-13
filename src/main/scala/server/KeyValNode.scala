@@ -32,7 +32,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
   private[server] val cluster = Reference.empty[Cluster]()
   private[server] val generator = IdGenerator(Random.nextInt(1024))
 
-  private[server] val dbs = if (clientOnly) List[OnDiskStore]() else for (i <- 0 to Env.cells) yield new OnDiskStore(s"$name-cell-$i", config, new File(path, s"cell-$i"), env, metrics, clientOnly)
+  private[server] val dbs = if (clientOnly) List[OnDiskStore]() else for (i <- 0 to Env.cells - 1) yield new OnDiskStore(s"$name-cell-$i", config, new File(path, s"cell-$i"), env, metrics, clientOnly)
   private[server] val running = new AtomicBoolean(false)
 
   Logger.configure()
@@ -64,7 +64,7 @@ class KeyValNode(val name: String, val config: Configuration, val path: File, va
     cluster            <== Cluster(system())
 
     if (!clientOnly) {
-      for (i <- 0 to Env.cells) {
+      for (i <- 0 to Env.cells - 1) {
         system().actorOf(Props(classOf[NodeCell], NodeCell.formattedName(i), dbs(i), metrics).withMailbox("map-config.akka.cell-prio-mailbox"), NodeCell.formattedName(i))
       }
     }

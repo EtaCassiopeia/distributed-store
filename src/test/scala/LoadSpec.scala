@@ -237,3 +237,47 @@ class Load3Spec extends Specification with Tags {
     }
   }
 }
+
+class Load4Spec extends Specification with Tags {
+  sequential
+
+  val nodeAmount = 3
+  val replication = 3
+  val clients = 3
+  val nbrOps = 50000
+
+  val timeout = Duration(10, TimeUnit.SECONDS)
+  implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(400))
+
+  "Distributed Map" should {
+
+    val env = ClusterEnv(replication, 1, 1)
+    val nodes = for (i <- 0 to nodeAmount - 1) yield KeyValNode(s"node$i-${IdGenerator.token(6)}", env)
+    val client1 = NodeClient(env)
+
+    "Start some nodes" in {
+      nodes.head.start("127.0.0.1", 7000)
+      nodes.tail.map(_.start(seedNodes = Seq("127.0.0.1:7000")))
+      client1.start(seedNodes = Seq("127.0.0.1:7000"))
+      env.start()
+      Thread.sleep(10000)   // Wait for cluster setup
+      success
+    }
+
+    "Insert data" in {
+      for (i <- 0 to nbrOps) {
+        Await.result(for {
+          _ <- client1.setString(IdGenerator.uuid, IdGenerator.token(65536))
+        } yield (), Duration(100, TimeUnit.MINUTES))
+      }
+      success
+    }
+
+    "Stop the nodes" in {
+      nodes.map(_.stop())
+      client1.stop()
+      env.stop()
+      success
+    }
+  }
+}

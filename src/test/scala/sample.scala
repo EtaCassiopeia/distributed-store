@@ -1,8 +1,9 @@
 import java.util.concurrent.Executors
 
 import config.ClusterEnv
-import play.api.libs.json.Json
+import play.api.libs.json.{JsValue, Json}
 import server.{KeyValNode, NodeClient}
+import server.implicits._
 
 import scala.concurrent.ExecutionContext
 
@@ -22,12 +23,12 @@ object ReadmeSample extends App {
   val client = NodeClient(env).start(seedNodes = Seq("127.0.0.1:7000"))
 
   val result = for {
-    _ <- client.set("key1", Json.obj("hello" -> "world"))  // persisted on 3 nodes
-    _ <- client.set("key99", Json.obj("goodbye" -> "world")) // persisted on 3 nodes
-    _ <- client.set("key50", Json.obj("mehhh" -> "world")) // persisted on 3 nodes
-    key1 <- client.get("key1")
-    key99 <- client.get("key99")
-    key50 <- client.get("key50")
+    _ <- client.set[JsValue]("key1", Json.obj("hello" -> "world"))  // persisted on 3 nodes
+    _ <- client.set[JsValue]("key99", Json.obj("goodbye" -> "world")) // persisted on 3 nodes
+    _ <- client.set[JsValue]("key50", Json.obj("mehhh" -> "world")) // persisted on 3 nodes
+    key1 <- client.get[JsValue]("key1")
+    key99 <- client.get[JsValue]("key99")
+    key50 <- client.get[JsValue]("key50")
     _ <- client.delete("key1")
     _ <- client.delete("key50")
     _ <- client.delete("key99")
