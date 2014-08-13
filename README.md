@@ -126,9 +126,9 @@ object ReadmeSample extends App {
 
   result.map {
     case (key1, key50, key99) =>
-      println(key1.map(Json.stringify(_)).getOrElse("Fail to read key1"))
-      println(key50.map(Json.stringify(_)).getOrElse("Fail to read key50"))
-      println(key99.map(Json.stringify(_)).getOrElse("Fail to read key99"))
+      println(key1.map(Json.stringify).getOrElse("Fail to read key1"))
+      println(key50.map(Json.stringify).getOrElse("Fail to read key50"))
+      println(key99.map(Json.stringify).getOrElse("Fail to read key99"))
   } andThen {
     case _ =>
       client.stop()
